@@ -9,7 +9,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url = env("DATABASE_URL")        // Automatically uses correct DB based on environment
-  directUrl = env("DIRECT_URL")    // Direct connection for migrations
+  directUrl = env("DIRECT_URL")    // Direct connection for migrations (optional)
 }
 
 // Authentication and User Management Models
@@ -113,8 +113,6 @@ model Note {
   noteTitle       String    @map("note_title")
   pageUrl         String?   @map("page_url")
   content         String
-  domain          String
-  metadata        Json?
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime? @updatedAt @map("updated_at")
   frontmatter     Json?     @default("{}") // Dynamic JSONB frontmatter fields
@@ -123,10 +121,6 @@ model Note {
   // Relations
   user            User      @relation(fields: [userId], references: [id])
   notebook        Notebook? @relation(fields: [notebookId], references: [id], onDelete: SetNull)
-  noteEntities    NoteEntity[]
-  entityRelationships EntityRelationship[]
-  collections     NoteCollection[]
-  processingJobs  ProcessingJob[]
 
   @@map("notes")
 }
@@ -139,6 +133,7 @@ model Notebook {
   userId      String   @map("user_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
+  frontmatter Json?    @default("{}") // Dynamic JSONB frontmatter fields
 
   // Relations
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -147,67 +142,6 @@ model Notebook {
   @@map("notebooks")
 }
 
-// AI-Powered Content Analysis Models
-
-/// Extracted entities from note content (people, places, technologies, concepts)
-model Entity {
-  id              String    @id @default(cuid())
-  userId          String    @map("user_id")
-  name            String
-  type            String
-  description     String?
-  aliases         String[]
-  confidenceScore Float?    @map("confidence_score")
-  mentionCount    Int?      @default(0) @map("mention_count")
-  firstMentionedAt DateTime? @map("first_mentioned_at")
-  lastMentionedAt DateTime? @map("last_mentioned_at")
-  metadata        Json?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime? @updatedAt @map("updated_at")
-
-  // Relations
-  noteEntities    NoteEntity[]
-  sourceRelationships EntityRelationship[] @relation("SourceEntity")
-  targetRelationships EntityRelationship[] @relation("TargetEntity")
-
-  @@map("entities")
-}
-
-/// Junction table linking notes to entities with relevance scoring
-model NoteEntity {
-  id              String  @id @default(cuid())
-  noteId          String  @map("note_id")
-  entityId        String  @map("entity_id")
-  relevanceScore  Float?  @map("relevance_score")
-  contextPosition Int?    @map("context_position")
-  createdAt       DateTime @default(now()) @map("created_at")
-
-  // Relations
-  note   Note   @relation(fields: [noteId], references: [id])
-  entity Entity @relation(fields: [entityId], references: [id])
-
-  @@map("note_entities")
-}
-
-/// Relationships between entities with contextual information
-model EntityRelationship {
-  id               String  @id @default(cuid())
-  userId           String  @map("user_id")
-  sourceEntityId   String  @map("source_entity_id")
-  targetEntityId   String  @map("target_entity_id")
-  relationshipType String  @map("relationship_type")
-  strength         Float?
-  context          String?
-  noteId           String? @map("note_id")
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  // Relations
-  sourceEntity Entity @relation("SourceEntity", fields: [sourceEntityId], references: [id])
-  targetEntity Entity @relation("TargetEntity", fields: [targetEntityId], references: [id])
-  note         Note?  @relation(fields: [noteId], references: [id])
-
-  @@map("entity_relationships")
-}
 
 // User Preferences and Organization Models
 
@@ -228,55 +162,4 @@ model UserProfile {
   @@map("user_profiles")
 }
 
-/// User-defined collections for organizing and grouping notes
-model Collection {
-  id          String    @id @default(cuid())
-  userId      String    @map("user_id")
-  name        String
-  description String?
-  color       String?
-  isDefault   Boolean?  @default(false) @map("is_default")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime? @updatedAt @map("updated_at")
 
-  // Relations
-  notes NoteCollection[]
-
-  @@map("collections")
-}
-
-/// Many-to-many relationship between notes and collections
-model NoteCollection {
-  noteId       String    @map("note_id")
-  collectionId String    @map("collection_id")
-  createdAt    DateTime? @default(now()) @map("created_at")
-
-  // Relations
-  note       Note       @relation(fields: [noteId], references: [id])
-  collection Collection @relation(fields: [collectionId], references: [id])
-
-  @@id([noteId, collectionId])
-  @@map("note_collections")
-}
-
-// Background Processing and Job Queue Models
-
-/// Background jobs for AI processing, content extraction, and other async tasks
-model ProcessingJob {
-  id           String    @id @default(cuid())
-  userId       String    @map("user_id")
-  noteId       String?   @map("note_id")
-  jobType      String    @map("job_type")
-  status       String?
-  inputData    Json?     @map("input_data")
-  outputData   Json?     @map("output_data")
-  errorMessage String?   @map("error_message")
-  createdAt    DateTime? @default(now()) @map("created_at")
-  startedAt    DateTime? @map("started_at")
-  completedAt  DateTime? @map("completed_at")
-
-  // Relations
-  note Note? @relation(fields: [noteId], references: [id])
-
-  @@map("processing_jobs")
-}
