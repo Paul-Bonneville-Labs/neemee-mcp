@@ -16,23 +16,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-This is a **Model Context Protocol (MCP) server** for the Neemee personal knowledge management system. It provides Claude Code and other MCP clients with access to notes, notebooks, and collections through a standardized interface.
+This is a **Model Context Protocol (MCP) server** for the Neemee personal knowledge management system. It provides Claude Code and other MCP clients with access to notes, notebooks, and collections through HTTP API calls to a Neemee backend service.
 
 ### Core Components
 
 **Server Architecture:**
 - **Main Server** (`src/server.ts`): Central MCP server implementation with resource/tool handlers
-- **Authentication** (`src/lib/mcp-auth.ts`): API key-based authentication with scoped permissions and caching
-- **Database Layer**: Prisma ORM with PostgreSQL for data persistence
+- **API Client** (`src/lib/neemee-api-client.ts`): HTTP client for communicating with Neemee API
+- **Tool Handlers** (`src/server-tools.ts`): Business logic for MCP tool operations
 - **Utilities** (`src/lib/domainUtils.ts`): URL/domain extraction and manipulation
 
-**Data Models (Prisma):**
-- **User**: Authentication with OAuth support
-- **Note**: Core content with markdown, frontmatter, and URL associations  
-- **Notebook**: Organizational containers for grouping notes
-- **UserApiKey**: Scoped API keys for MCP access (`read`, `write`, `admin`)
-- **Account/Session**: OAuth authentication state
-- **UserProfile**: Extended user preferences and metadata
+**API Integration:**
+- **Authentication**: API key-based authentication handled by Neemee API
+- **Data Access**: All CRUD operations performed via HTTP API calls
+- **Scoped Permissions**: API key scopes (`read`, `write`, `admin`) enforced by backend
+- **No Direct Database Access**: Maintains proper separation of concerns
 
 ### Key Features
 
@@ -59,29 +57,31 @@ This is a **Model Context Protocol (MCP) server** for the Neemee personal knowle
 
 **Environment Variables:**
 - `NEEMEE_API_KEY` (required): API key for authentication
-- `DATABASE_URL`: PostgreSQL connection string
-- `NEEMEE_API_BASE_URL`: Base URL for Neemee API (optional)
+- `NEEMEE_API_BASE_URL` (optional): Base URL for Neemee API (defaults to http://localhost:3000/api)
 
-### Database Schema
+### API Architecture
 
-The Prisma schema supports:
-- Multi-user tenancy with user isolation
-- Dynamic JSONB frontmatter for extensible metadata
-- Hierarchical organization through notebooks
-- OAuth authentication flow
-- API key management with expiration and usage tracking
+The MCP server acts as a client to the Neemee API:
+- **Stateless Design**: No local data storage or caching
+- **HTTP-Based Communication**: All operations via REST API calls
+- **Authentication Delegation**: API key validation handled by backend
+- **Error Handling**: Proper error propagation from API to MCP client
+- **Resource Mapping**: MCP resources and tools mapped to corresponding API endpoints
 
-### Performance Optimizations
+### Performance Considerations
 
-- **API Key Caching**: 5-minute in-memory cache to reduce database/bcrypt operations
-- **Efficient Queries**: Optimized Prisma queries with selective field loading
-- **Fuzzy Search**: Fallback normalized text matching for better search results
-- **Async Operations**: Non-blocking API key usage timestamp updates
+- **Network Dependency**: Requires reliable connection to Neemee API
+- **API Rate Limits**: Respects backend API rate limiting
+- **Efficient Data Transfer**: Minimal payload sizes and selective field requests
+- **Connection Reuse**: HTTP client optimized for multiple requests
 
 ## Testing & Validation
 
 No specific test framework is configured. Use the MCP protocol directly or through Claude Desktop for integration testing.
 
-## Database
+## Deployment
 
-Uses PostgreSQL with Prisma ORM. The schema is designed to sync with a frontend Neemee application and includes comprehensive user management, content organization, and API access control.
+This MCP server only requires:
+- Node.js runtime environment
+- Network access to Neemee API endpoint
+- Valid API key with appropriate scopes

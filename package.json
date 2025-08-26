@@ -34,18 +34,11 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.3",
-    "@prisma/client": "^6.13.0",
-    "bcryptjs": "^3.0.2"
+    "@modelcontextprotocol/sdk": "^1.17.3"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
-    "prisma": "^6.13.0",
     "tsx": "^4.19.4",
     "typescript": "^5"
-  },
-  "peerDependencies": {
-    "@prisma/client": ">=5.0.0"
   }
 }
