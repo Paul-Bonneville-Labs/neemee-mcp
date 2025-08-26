@@ -8,11 +8,25 @@ import {
   InitializeRequestSchema,
   InitializedNotificationSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { prisma } from './lib/prisma.js';
+// Import Prisma Client directly for MCP server to avoid logging conflicts
+import { PrismaClient } from '@prisma/client';
+
+// Create a Prisma instance specifically for MCP server without logging
+const prisma = new PrismaClient({
+  log: [], // Disable all logging for MCP server to prevent JSON-RPC interference
+  errorFormat: 'minimal',
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URL || 'postgresql://neemee_user:local_dev_password@localhost:5433/neemee'
+    }
+  }
+});
+import { extractDomain } from './lib/domainUtils.js';
 import { Prisma } from '@prisma/client';
 import { getMcpAuthContext, hasRequiredScope, buildNoteSearchFilters, buildNotebookSearchFilters, resolveNotebook } from './lib/mcp-auth.js';
 
@@ -24,7 +38,10 @@ const server = new Server(
   },
   {
     capabilities: {
-      resources: {},
+      resources: {
+        subscribe: true,
+        listChanged: true
+      },
       tools: {},
     },
   }
@@ -33,10 +50,8 @@ const server = new Server(
 // MCP Protocol Handlers
 
 // Initialize handler
-server.setRequestHandler(InitializeRequestSchema, async (request) => {
-  console.error('DEBUG: Received initialize request');
-  console.error('DEBUG: Request params:', JSON.stringify(request.params));
-  const response = {
+server.setRequestHandler(InitializeRequestSchema, async () => {
+  return {
     protocolVersion: '2024-11-05',
     capabilities: {
       resources: {},
@@ -47,13 +62,11 @@ server.setRequestHandler(InitializeRequestSchema, async (request) => {
       version: '1.0.0',
     },
   };
-  console.error('DEBUG: Sending initialize response:', JSON.stringify(response));
-  return response;
 });
 
 // Initialized notification handler
 server.setNotificationHandler(InitializedNotificationSchema, async () => {
-  console.error('DEBUG: Received initialized notification');
+  // Initialization complete - ready for requests
 });
 
 // Helper function to authenticate API key from environment or stdin
@@ -71,7 +84,7 @@ async function authenticateRequest(): Promise<{
     );
   }
 
-  const authContext = await getMcpAuthContext(apiKey);
+  const authContext = await getMcpAuthContext(prisma, apiKey);
   
   if (!authContext) {
     throw new McpError(
@@ -98,28 +111,62 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         description: 'List of user notes with pagination, search, and notebook filtering support',
       },
       {
-        uri: 'notes://search',
-        mimeType: 'application/json',
-        name: 'Notes Search',
-        description: 'Advanced search across note content and metadata with notebook filtering',
-      },
-      {
         uri: 'notebooks://list',
         mimeType: 'application/json',
         name: 'Notebooks List',
-        description: 'List of user notebooks with search support',
-      },
-      {
-        uri: 'collections://list',
-        mimeType: 'application/json',
-        name: 'Collections List',
-        description: 'List of user note collections',
+        description: 'List of user notebooks with pagination and search support',
       },
       {
         uri: 'stats://overview',
         mimeType: 'application/json',
         name: 'Statistics Overview',
         description: 'Overview of note statistics and insights',
+      },
+      {
+        uri: 'system://health',
+        mimeType: 'application/json',
+        name: 'System Health',
+        description: 'Database connectivity and system status information',
+      },
+      {
+        uri: 'collections://recent',
+        mimeType: 'application/json',
+        name: 'Recent Activity',
+        description: 'Recently created and updated notes for LLM context',
+      },
+    ],
+    resourceTemplates: [
+      {
+        uriTemplate: 'notebooks://{notebookId}',
+        name: 'Individual Notebook',
+        description: 'Access a specific notebook by ID with details and note count',
+        mimeType: 'application/json',
+      },
+      {
+        uriTemplate: 'notes://{noteId}',
+        name: 'Individual Note',
+        description: 'Access a specific note by ID with full content and frontmatter',
+        mimeType: 'application/json',
+      },
+    ],
+  };
+});
+
+// Resource templates handler
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return {
+    resourceTemplates: [
+      {
+        uriTemplate: 'notes://{noteId}',
+        mimeType: 'application/json',
+        name: 'Individual Note',
+        description: 'Access a specific note by its ID',
+      },
+      {
+        uriTemplate: 'notebooks://{notebookId}',
+        mimeType: 'application/json',
+        name: 'Individual Notebook',
+        description: 'Access a specific notebook by its ID',
       },
     ],
   };
@@ -139,8 +186,15 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const url = new URL(uri);
   
   try {
-    switch (url.protocol + '//' + url.hostname) {
-      case 'notes://list': {
+    // Handle different URI patterns
+    const protocol = url.protocol;
+    const hostname = url.hostname;
+    const pathname = url.pathname;
+    
+    switch (protocol) {
+      case 'notes:':
+        if (hostname === 'list') {
+          // Handle notes://list
         const searchParams = new URLSearchParams(url.search);
         const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
         const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')));
@@ -155,7 +209,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         // Resolve notebook query to IDs if provided
         let notebookIds: string[] | undefined;
         if (notebookQuery) {
-          notebookIds = await resolveNotebook({
+          notebookIds = await resolveNotebook(prisma, {
             userId: authContext!.userId,
             notebookQuery
           });
@@ -179,9 +233,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
               content: true,
               pageUrl: true,
               noteTitle: true,
-              metadata: true,
               frontmatter: true,
-              domain: true,
               createdAt: true,
               updatedAt: true,
               notebookId: true,
@@ -201,6 +253,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
         const transformedNotes = notes.map(note => ({
           ...note,
+          domain: extractDomain(note.pageUrl) || 'manual',
           createdAt: note.createdAt.toISOString(),
           updatedAt: note.updatedAt?.toISOString() || null,
           notebook: note.notebook ? {
@@ -232,90 +285,76 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
             },
           ],
         };
-      }
+        } else {
+          // Handle individual note: notes://{noteId}
+          const noteId = pathname.substring(1); // Remove leading slash
+          
+          if (!noteId) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              'Note ID is required for individual note access'
+            );
+          }
 
-      case 'notes://search': {
-        const searchParams = new URLSearchParams(url.search);
-        const query = searchParams.get('query')?.trim();
-        const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')));
-        const notebookQuery = searchParams.get('notebook')?.trim();
-
-        if (!query) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Search query is required'
-          );
-        }
-
-        // Resolve notebook query to IDs if provided
-        let notebookIds: string[] | undefined;
-        if (notebookQuery) {
-          notebookIds = await resolveNotebook({
-            userId: authContext!.userId,
-            notebookQuery
-          });
-        }
-
-        const where = buildNoteSearchFilters({
-          userId: authContext!.userId,
-          search: query,
-          notebookIds
-        });
-
-        const notes = await prisma.note.findMany({
-          where,
-          select: {
-            id: true,
-            userId: true,
-            content: true,
-            pageUrl: true,
-            noteTitle: true,
-            metadata: true,
-            frontmatter: true,
-            domain: true,
-            createdAt: true,
-            updatedAt: true,
-            notebookId: true,
-            notebook: {
-              select: {
-                id: true,
-                name: true
+          const note = await prisma.note.findFirst({
+            where: {
+              id: noteId,
+              userId: authContext!.userId,
+            },
+            select: {
+              id: true,
+              userId: true,
+              content: true,
+              pageUrl: true,
+              noteTitle: true,
+              frontmatter: true,
+              createdAt: true,
+              updatedAt: true,
+              notebookId: true,
+              notebook: {
+                select: {
+                  id: true,
+                  name: true
+                }
               }
             }
-          },
-          orderBy: { createdAt: 'desc' },
-          take: limit
-        });
+          });
 
-        const transformedNotes = notes.map(note => ({
-          ...note,
-          createdAt: note.createdAt.toISOString(),
-          updatedAt: note.updatedAt?.toISOString() || null,
-          notebook: note.notebook ? {
-            id: note.notebook.id,
-            name: note.notebook.name
-          } : null
-        }));
+          if (!note) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `Note not found: ${noteId}`
+            );
+          }
 
-        return {
-          contents: [
-            {
-              uri,
-              mimeType: 'application/json',
-              text: JSON.stringify({
-                query,
-                notes: transformedNotes,
-                total: notes.length,
-                filters: {
-                  notebook: notebookQuery
-                }
-              }, null, 2),
-            },
-          ],
-        };
-      }
+          const transformedNote = {
+            ...note,
+            domain: extractDomain(note.pageUrl) || 'manual',
+            createdAt: note.createdAt.toISOString(),
+            updatedAt: note.updatedAt?.toISOString() || null,
+            notebook: note.notebook ? {
+              id: note.notebook.id,
+              name: note.notebook.name
+            } : null
+          };
 
-      case 'notebooks://list': {
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(transformedNote, null, 2),
+              },
+            ],
+          };
+        }
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Invalid resource path for this protocol`
+        );
+
+      case 'notebooks:':
+        if (hostname === 'list') {
         const searchParams = new URLSearchParams(url.search);
         const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
         const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')));
@@ -377,63 +416,76 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
             },
           ],
         };
-      }
+        } else {
+          // Handle individual notebook: notebooks://{notebookId}
+          const notebookId = pathname.substring(1); // Remove leading slash
+          
+          if (!notebookId) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              'Notebook ID is required for individual notebook access'
+            );
+          }
 
-      case 'collections://list': {
-        const collections = await prisma.collection.findMany({
-          where: {
-            userId: authContext!.userId,
-          },
-          select: {
-            id: true,
-            userId: true,
-            name: true,
-            description: true,
-            color: true,
-            isDefault: true,
-            createdAt: true,
-            updatedAt: true,
-            _count: {
-              select: {
-                notes: true
+          const notebook = await prisma.notebook.findFirst({
+            where: {
+              id: notebookId,
+              userId: authContext!.userId,
+            },
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              userId: true,
+              createdAt: true,
+              updatedAt: true,
+              _count: {
+                select: {
+                  notes: true
+                }
               }
             }
-          },
-          orderBy: { createdAt: 'desc' }
-        });
+          });
 
-        const transformedCollections = collections.map(collection => ({
-          ...collection,
-          noteCount: collection._count.notes,
-          createdAt: collection.createdAt.toISOString(),
-          updatedAt: collection.updatedAt?.toISOString() || null,
-        }));
+          if (!notebook) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `Notebook not found: ${notebookId}`
+            );
+          }
 
-        return {
-          contents: [
-            {
-              uri,
-              mimeType: 'application/json',
-              text: JSON.stringify({
-                collections: transformedCollections
-              }, null, 2),
-            },
-          ],
-        };
-      }
+          const transformedNotebook = {
+            ...notebook,
+            noteCount: notebook._count.notes,
+            createdAt: notebook.createdAt.toISOString(),
+            updatedAt: notebook.updatedAt.toISOString(),
+          };
 
-      case 'stats://overview': {
-        const [noteCount, collectionCount, recentNotes] = await Promise.all([
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(transformedNotebook, null, 2),
+              },
+            ],
+          };
+        }
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Invalid resource path for this protocol`
+        );
+
+      case 'stats:':
+        if (hostname === 'overview') {
+        const [noteCount, recentNotes] = await Promise.all([
           prisma.note.count({
-            where: { userId: authContext!.userId }
-          }),
-          prisma.collection.count({
             where: { userId: authContext!.userId }
           }),
           prisma.note.findMany({
             where: { userId: authContext!.userId },
             select: {
-              domain: true,
+              pageUrl: true,
               createdAt: true
             },
             orderBy: { createdAt: 'desc' },
@@ -441,9 +493,10 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
           })
         ]);
 
-        // Calculate domain statistics
+        // Calculate domain statistics using computed domains
         const domainStats = recentNotes.reduce((acc, note) => {
-          acc[note.domain] = (acc[note.domain] || 0) + 1;
+          const domain = extractDomain(note.pageUrl) || 'manual';
+          acc[domain] = (acc[domain] || 0) + 1;
           return acc;
         }, {} as Record<string, number>);
 
@@ -467,7 +520,6 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
               mimeType: 'application/json',
               text: JSON.stringify({
                 totalNotes: noteCount,
-                totalCollections: collectionCount,
                 recentActivity: recentActivity,
                 topDomains: topDomains,
                 generatedAt: new Date().toISOString()
@@ -475,54 +527,166 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
             },
           ],
         };
-      }
+        }
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Invalid resource path for this protocol`
+        );
 
-      default:
-        // Try to handle individual note access: notes://[id]
-        if (url.hostname && url.protocol === 'notes:') {
-          const noteId = url.hostname;
+      case 'system:':
+        if (hostname === 'health') {
+        try {
+          // Test database connectivity
+          await prisma.$queryRaw`SELECT 1`;
           
-          const note = await prisma.note.findFirst({
-            where: {
-              id: noteId,
-              userId: authContext!.userId,
+          const healthData = {
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            database: {
+              status: 'connected',
+              type: 'PostgreSQL'
             },
-            select: {
-              id: true,
-              userId: true,
-              content: true,
-              pageUrl: true,
-              noteTitle: true,
-              metadata: true,
-              frontmatter: true,
-              domain: true,
-              createdAt: true,
-              updatedAt: true
+            mcp_server: {
+              version: '1.0.0',
+              capabilities: ['resources', 'tools']
             }
-          });
-
-          if (!note) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              `Note not found: ${noteId}`
-            );
-          }
+          };
 
           return {
             contents: [
               {
                 uri,
                 mimeType: 'application/json',
-                text: JSON.stringify({
-                  ...note,
-                  createdAt: note.createdAt.toISOString(),
-                  updatedAt: note.updatedAt?.toISOString() || null,
-                }, null, 2),
+                text: JSON.stringify(healthData, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          const healthData = {
+            status: 'unhealthy',
+            timestamp: new Date().toISOString(),
+            database: {
+              status: 'disconnected',
+              error: error instanceof Error ? error.message : 'Unknown error'
+            },
+            mcp_server: {
+              version: '1.0.0',
+              capabilities: ['resources', 'tools']
+            }
+          };
+
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(healthData, null, 2),
               },
             ],
           };
         }
+        }
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Invalid resource path for this protocol`
+        );
 
+      case 'collections:':
+        if (hostname === 'recent') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const [recentNotes, recentNotebooks] = await Promise.all([
+          prisma.note.findMany({
+            where: {
+              userId: authContext!.userId,
+              OR: [
+                { createdAt: { gte: thirtyDaysAgo } },
+                { updatedAt: { gte: thirtyDaysAgo } }
+              ]
+            },
+            select: {
+              id: true,
+              noteTitle: true,
+              pageUrl: true,
+              createdAt: true,
+              updatedAt: true,
+              notebook: {
+                select: {
+                  name: true
+                }
+              }
+            },
+            orderBy: [
+              { updatedAt: 'desc' },
+              { createdAt: 'desc' }
+            ],
+            take: 20
+          }),
+          prisma.notebook.findMany({
+            where: {
+              userId: authContext!.userId,
+              OR: [
+                { createdAt: { gte: thirtyDaysAgo } },
+                { updatedAt: { gte: thirtyDaysAgo } }
+              ]
+            },
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              createdAt: true,
+              updatedAt: true,
+              _count: {
+                select: {
+                  notes: true
+                }
+              }
+            },
+            orderBy: [
+              { updatedAt: 'desc' },
+              { createdAt: 'desc' }
+            ],
+            take: 10
+          })
+        ]);
+
+        const recentActivity = {
+          summary: {
+            timeframe: 'Last 30 days',
+            noteCount: recentNotes.length,
+            notebookCount: recentNotebooks.length
+          },
+          recentNotes: recentNotes.map(note => ({
+            ...note,
+            domain: extractDomain(note.pageUrl) || 'manual',
+            createdAt: note.createdAt.toISOString(),
+            updatedAt: note.updatedAt?.toISOString() || null,
+          })),
+          recentNotebooks: recentNotebooks.map(notebook => ({
+            ...notebook,
+            noteCount: notebook._count.notes,
+            createdAt: notebook.createdAt.toISOString(),
+            updatedAt: notebook.updatedAt.toISOString(),
+          }))
+        };
+
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: 'application/json',
+              text: JSON.stringify(recentActivity, null, 2),
+            },
+          ],
+        };
+        }
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Invalid resource path for this protocol`
+        );
+
+      default:
         throw new McpError(
           ErrorCode.InvalidRequest,
           `Unknown resource: ${uri}`
@@ -547,7 +711,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'create_note',
-        description: 'Create a new note with content and metadata',
+        description: 'Create a new note with content and frontmatter',
         inputSchema: {
           type: 'object',
           properties: {
@@ -563,9 +727,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Optional source URL for the note',
             },
+            notebook: {
+              type: 'string',
+              description: 'Optional notebook name, partial name, or ID to assign the note to',
+            },
             frontmatter: {
               type: 'object',
-              description: 'Optional frontmatter metadata as key-value pairs',
+              description: 'Optional frontmatter fields as key-value pairs',
             },
           },
           required: ['content'],
@@ -591,7 +759,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             frontmatter: {
               type: 'object',
-              description: 'Updated frontmatter metadata',
+              description: 'Updated frontmatter fields',
             },
           },
           required: ['id'],
@@ -617,13 +785,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_notes',
-        description: 'Search notes with advanced filters including notebook filtering',
+        description: 'Search notes with advanced filters including notebook filtering. Empty query lists all notes.',
         inputSchema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'Search query to match against note content and titles',
+              description: 'Search query to match against note content and titles. Leave empty to list all notes.',
             },
             notebook: {
               type: 'string',
@@ -646,25 +814,83 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Maximum number of results to return (default: 20, max: 100)',
             },
           },
-          required: ['query'],
+          required: [],
         },
       },
       {
         name: 'search_notebooks',
-        description: 'Search notebooks by name and description',
+        description: 'Search notebooks by name and description. Empty query lists all notebooks.',
         inputSchema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'Search query to match against notebook name and description',
+              description: 'Search query to match against notebook name and description. Leave empty to list all notebooks.',
             },
             limit: {
               type: 'number',
               description: 'Maximum number of results to return (default: 20, max: 100)',
             },
           },
-          required: ['query'],
+          required: [],
+        },
+      },
+      {
+        name: 'create_notebook',
+        description: 'Create a new notebook for organizing notes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'The name of the notebook',
+            },
+            description: {
+              type: 'string',
+              description: 'Optional description for the notebook',
+            },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'update_notebook',
+        description: 'Update an existing notebook',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'The ID of the notebook to update',
+            },
+            name: {
+              type: 'string',
+              description: 'Updated notebook name',
+            },
+            description: {
+              type: 'string',
+              description: 'Updated notebook description',
+            },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'delete_notebook',
+        description: 'Delete a notebook by ID (notes will be unassigned, not deleted)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'The ID of the notebook to delete',
+            },
+            confirm: {
+              type: 'boolean',
+              description: 'Confirmation that the notebook should be deleted',
+            },
+          },
+          required: ['id', 'confirm'],
         },
       },
     ],
@@ -672,13 +898,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  console.error('DEBUG: Received tool call request');
   const { name, arguments: args } = request.params;
-  console.error('DEBUG: Tool name:', name);
-  console.error('DEBUG: Tool arguments:', JSON.stringify(args));
-  console.error('DEBUG: Starting authentication...');
   const authContext = await authenticateRequest();
-  console.error('DEBUG: Authentication complete');
 
   try {
     switch (name) {
@@ -690,10 +911,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const { content, title, url, frontmatter } = args as {
+        const { content, title, url, notebook, frontmatter } = args as {
           content: string;
           title?: string;
           url?: string;
+          notebook?: string;
           frontmatter?: Record<string, unknown>;
         };
 
@@ -704,14 +926,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        // Extract domain from URL if provided
-        let domain = 'manual';
-        if (url) {
-          try {
-            domain = new URL(url).hostname;
-          } catch {
-            // Invalid URL, use default domain
+        // Resolve notebook if provided
+        let notebookId: string | null = null;
+        if (notebook?.trim()) {
+          const notebookIds = await resolveNotebook(prisma, {
+            userId: authContext!.userId,
+            notebookQuery: notebook.trim()
+          });
+          
+          if (notebookIds.length === 0) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `No notebook found matching "${notebook}". Please check the notebook name and try again.`
+            );
           }
+          
+          // Use the first match if multiple notebooks found
+          notebookId = notebookIds[0];
         }
 
         const note = await prisma.note.create({
@@ -720,15 +951,93 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: content.trim(),
             noteTitle: title?.trim() || 'Untitled Note',
             pageUrl: url || null,
-            domain,
-            metadata: {},
-            frontmatter: frontmatter as Prisma.InputJsonValue || {},
+            notebookId: notebookId,
+            frontmatter: {
+              ...(frontmatter || {}),
+              created_via: { type: 'string', value: 'mcp' }
+            } as Prisma.InputJsonValue,
           },
           select: {
             id: true,
             noteTitle: true,
             content: true,
             createdAt: true,
+            notebookId: true,
+            notebook: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const notebookInfo = note.notebook ? ` in notebook "${note.notebook.name}"` : '';
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully created note "${note.noteTitle}" with ID: ${note.id}${notebookInfo}`,
+            },
+          ],
+        };
+      }
+
+      case 'update_note': {
+        if (!hasRequiredScope(authContext, 'write')) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Insufficient permissions. Write scope required.'
+          );
+        }
+
+        const { id, content, title, frontmatter } = args as {
+          id: string;
+          content?: string;
+          title?: string;
+          frontmatter?: Record<string, unknown>;
+        };
+
+        if (!id) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Note ID is required'
+          );
+        }
+
+        // Verify note exists and belongs to user
+        const existingNote = await prisma.note.findFirst({
+          where: {
+            id,
+            userId: authContext!.userId,
+          },
+        });
+
+        if (!existingNote) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            `Note not found: ${id}`
+          );
+        }
+
+        const updateData: Record<string, unknown> = {};
+        if (content !== undefined) updateData.content = content.trim();
+        if (title !== undefined) updateData.noteTitle = title.trim();
+        if (frontmatter !== undefined) updateData.frontmatter = frontmatter;
+
+        if (Object.keys(updateData).length === 0) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'At least one field must be provided for update'
+          );
+        }
+
+        const updatedNote = await prisma.note.update({
+          where: { id },
+          data: updateData,
+          select: {
+            id: true,
+            noteTitle: true,
+            updatedAt: true,
           }
         });
 
@@ -736,97 +1045,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: `Successfully created note "${note.noteTitle}" with ID: ${note.id}`,
+              text: `Successfully updated note "${updatedNote.noteTitle}" (ID: ${updatedNote.id})`,
             },
           ],
         };
-      }
-
-      case 'update_note': {
-        console.error('DEBUG: Starting update_note');
-        try {
-          if (!hasRequiredScope(authContext, 'write')) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Insufficient permissions. Write scope required.'
-            );
-          }
-          console.error('DEBUG: Permissions checked');
-
-          const { id, content, title, frontmatter } = args as {
-            id: string;
-            content?: string;
-            title?: string;
-            frontmatter?: Record<string, unknown>;
-          };
-
-          if (!id) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Note ID is required'
-            );
-          }
-          console.error('DEBUG: Note ID validated:', id);
-
-          // Verify note exists and belongs to user
-          console.error('DEBUG: Checking if note exists...');
-          const existingNote = await prisma.note.findFirst({
-            where: {
-              id,
-              userId: authContext!.userId,
-            },
-          });
-          console.error('DEBUG: Note exists check complete:', !!existingNote);
-
-          if (!existingNote) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              `Note not found: ${id}`
-            );
-          }
-
-          const updateData: Record<string, unknown> = {};
-          if (content !== undefined) updateData.content = content.trim();
-          if (title !== undefined) updateData.noteTitle = title.trim();
-          if (frontmatter !== undefined) updateData.frontmatter = frontmatter;
-
-          console.error('DEBUG: Update data prepared:', updateData);
-
-          if (Object.keys(updateData).length === 0) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'At least one field must be provided for update'
-            );
-          }
-
-          console.error('DEBUG: Starting database update...');
-          const updatedNote = await prisma.note.update({
-            where: { id },
-            data: updateData,
-            select: {
-              id: true,
-              noteTitle: true,
-              updatedAt: true,
-            }
-          });
-          console.error('DEBUG: Database update complete:', updatedNote);
-
-          const response = {
-            content: [
-              {
-                type: 'text',
-                text: `Successfully updated note "${updatedNote.noteTitle}" (ID: ${updatedNote.id})`,
-              },
-            ],
-          };
-          console.error('DEBUG: Response prepared:', JSON.stringify(response));
-          
-          console.error('DEBUG: Returning response...');
-          return response;
-        } catch (error) {
-          console.error('DEBUG: Error in update_note case:', error);
-          throw error;
-        }
       }
 
       case 'delete_note': {
@@ -898,7 +1120,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const { query, notebook, domain, startDate, endDate, limit } = args as {
-          query: string;
+          query?: string;
           notebook?: string;
           domain?: string;
           startDate?: string;
@@ -906,19 +1128,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           limit?: number;
         };
 
-        if (!query?.trim()) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Search query is required'
-          );
-        }
+        // Empty query is allowed - will list all notes
 
         const searchLimit = Math.min(100, Math.max(1, limit || 20));
 
         // Resolve notebook query to IDs if provided
         let notebookIds: string[] | undefined;
         if (notebook?.trim()) {
-          notebookIds = await resolveNotebook({
+          notebookIds = await resolveNotebook(prisma, {
             userId: authContext!.userId,
             notebookQuery: notebook.trim()
           });
@@ -937,7 +1154,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const where = buildNoteSearchFilters({
           userId: authContext!.userId,
-          search: query.trim(),
+          search: query?.trim(),
           domain,
           startDate,
           endDate,
@@ -951,7 +1168,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             noteTitle: true,
             content: true,
             pageUrl: true,
-            domain: true,
             createdAt: true,
             notebook: {
               select: {
@@ -964,16 +1180,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           take: searchLimit
         });
 
+        const queryDescription = query?.trim() ? `matching "${query}"` : 'found';
         const resultText = notes.length > 0
-          ? `Found ${notes.length} notes matching "${query}"${notebook ? ` in notebook(s) matching "${notebook}"` : ''}:\n\n` +
+          ? `Found ${notes.length} notes ${queryDescription}${notebook ? ` in notebook(s) matching "${notebook}"` : ''}:\n\n` +
             notes.map((note, index) => 
               `${index + 1}. ${note.noteTitle} (${note.id})\n` +
-              `   Domain: ${note.domain}\n` +
+              `   Domain: ${extractDomain(note.pageUrl) || 'manual'}\n` +
               `   Notebook: ${note.notebook?.name || 'None'}\n` +
               `   Created: ${note.createdAt.toISOString()}\n` +
-              `   Content preview: ${note.content.substring(0, 200)}${note.content.length > 200 ? '...' : ''}\n`
+              `   Content: ${note.content}\n`
             ).join('\n')
-          : `No notes found matching "${query}"${notebook ? ` in notebook(s) matching "${notebook}"` : ''}`;
+          : `No notes ${queryDescription}${notebook ? ` in notebook(s) matching "${notebook}"` : ''}`;
 
         return {
           content: [
@@ -994,22 +1211,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const { query, limit } = args as {
-          query: string;
+          query?: string;
           limit?: number;
         };
 
-        if (!query?.trim()) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'Search query is required'
-          );
-        }
+        // Empty query is allowed - will list all notebooks
 
         const searchLimit = Math.min(100, Math.max(1, limit || 20));
 
         const where = buildNotebookSearchFilters({
           userId: authContext!.userId,
-          search: query.trim()
+          search: query?.trim()
         });
 
         const notebooks = await prisma.notebook.findMany({
@@ -1029,21 +1241,200 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           take: searchLimit
         });
 
+        const queryDescription = query?.trim() ? `matching "${query}"` : 'found';
         const resultText = notebooks.length > 0
-          ? `Found ${notebooks.length} notebooks matching "${query}":\n\n` +
+          ? `Found ${notebooks.length} notebooks ${queryDescription}:\n\n` +
             notebooks.map((notebook, index) => 
               `${index + 1}. ${notebook.name} (${notebook.id})\n` +
               `   Description: ${notebook.description || 'No description'}\n` +
               `   Notes: ${notebook._count.notes}\n` +
               `   Created: ${notebook.createdAt.toISOString()}\n`
             ).join('\n')
-          : `No notebooks found matching "${query}"`;
+          : `No notebooks ${queryDescription}`;
 
         return {
           content: [
             {
               type: 'text',
               text: resultText,
+            },
+          ],
+        };
+      }
+
+      case 'create_notebook': {
+        if (!hasRequiredScope(authContext, 'write')) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Insufficient permissions. Write scope required.'
+          );
+        }
+
+        const { name, description } = args as {
+          name: string;
+          description?: string;
+        };
+
+        if (!name?.trim()) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Notebook name is required'
+          );
+        }
+
+        const notebook = await prisma.notebook.create({
+          data: {
+            userId: authContext!.userId,
+            name: name.trim(),
+            description: description?.trim() || null,
+            frontmatter: { created_via: { type: 'string', value: 'mcp' } },
+          },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            createdAt: true,
+          }
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully created notebook "${notebook.name}" with ID: ${notebook.id}`,
+            },
+          ],
+        };
+      }
+
+      case 'update_notebook': {
+        if (!hasRequiredScope(authContext, 'write')) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Insufficient permissions. Write scope required.'
+          );
+        }
+
+        const { id, name, description } = args as {
+          id: string;
+          name?: string;
+          description?: string;
+        };
+
+        if (!id) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Notebook ID is required'
+          );
+        }
+
+        // Verify notebook exists and belongs to user
+        const existingNotebook = await prisma.notebook.findFirst({
+          where: {
+            id,
+            userId: authContext!.userId,
+          },
+        });
+
+        if (!existingNotebook) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            `Notebook not found: ${id}`
+          );
+        }
+
+        const updateData: Record<string, unknown> = {};
+        if (name !== undefined) updateData.name = name.trim();
+        if (description !== undefined) updateData.description = description?.trim() || null;
+
+        if (Object.keys(updateData).length === 0) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'At least one field must be provided for update'
+          );
+        }
+
+        const updatedNotebook = await prisma.notebook.update({
+          where: { id },
+          data: updateData,
+          select: {
+            id: true,
+            name: true,
+            updatedAt: true,
+          }
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully updated notebook "${updatedNotebook.name}" (ID: ${updatedNotebook.id})`,
+            },
+          ],
+        };
+      }
+
+      case 'delete_notebook': {
+        if (!hasRequiredScope(authContext, 'admin')) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Insufficient permissions. Admin scope required.'
+          );
+        }
+
+        const { id, confirm } = args as {
+          id: string;
+          confirm: boolean;
+        };
+
+        if (!id) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Notebook ID is required'
+          );
+        }
+
+        if (!confirm) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            'Confirmation required to delete notebook'
+          );
+        }
+
+        // Verify notebook exists and belongs to user
+        const existingNotebook = await prisma.notebook.findFirst({
+          where: {
+            id,
+            userId: authContext!.userId,
+          },
+          select: {
+            id: true,
+            name: true,
+            _count: {
+              select: {
+                notes: true
+              }
+            }
+          }
+        });
+
+        if (!existingNotebook) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            `Notebook not found: ${id}`
+          );
+        }
+
+        // Notes will be automatically unassigned (notebookId set to null) due to onDelete: SetNull
+        await prisma.notebook.delete({
+          where: { id },
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully deleted notebook "${existingNotebook.name}" (ID: ${existingNotebook.id}). ${existingNotebook._count.notes} notes were unassigned but not deleted.`,
             },
           ],
         };
@@ -1056,14 +1447,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
     }
   } catch (error) {
-    console.error('DEBUG: Caught error in tool handler:', error);
     if (error instanceof McpError) {
-      console.error('DEBUG: Rethrowing McpError');
       throw error;
     }
     
-    console.error('Error calling tool:', error);
-    console.error('DEBUG: Throwing InternalError');
     throw new McpError(
       ErrorCode.InternalError,
       `Failed to execute tool: ${name}`
@@ -1073,18 +1460,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
-  console.error('DEBUG: Creating stdio transport...');
   const transport = new StdioServerTransport();
-  
-  console.error('DEBUG: Connecting server to transport...');
   await server.connect(transport);
-  
-  console.error('Neemee MCP server running on stdio');
-  console.error('DEBUG: Server connected and ready for requests');
   
   // Keep the process alive
   process.on('SIGINT', async () => {
-    console.error('DEBUG: Received SIGINT, shutting down...');
     await server.close();
     process.exit(0);
   });

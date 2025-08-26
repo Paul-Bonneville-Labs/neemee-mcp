@@ -1,4 +1,4 @@
-import { prisma } from './prisma.js';
+import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -18,7 +18,7 @@ const keyCache = new Map<string, {
  * Validate API key and return user context
  * Optimized with caching and limited database queries
  */
-async function validateApiKey(apiKey: string): Promise<{
+async function validateApiKey(prisma: PrismaClient, apiKey: string): Promise<{
   userId: string;
   scopes: string[];
   keyId: string;
@@ -90,13 +90,13 @@ async function validateApiKey(apiKey: string): Promise<{
 /**
  * Get authentication context from API key (MCP server only)
  */
-export async function getMcpAuthContext(apiKey: string): Promise<{
+export async function getMcpAuthContext(prisma: PrismaClient, apiKey: string): Promise<{
   userId: string; 
   authType: 'api-key';
   scopes: string[];
   keyId: string;
 } | null> {
-  const apiKeyAuth = await validateApiKey(apiKey);
+  const apiKeyAuth = await validateApiKey(prisma, apiKey);
   if (apiKeyAuth) {
     return {
       userId: apiKeyAuth.userId,
@@ -122,10 +122,22 @@ export function hasRequiredScope(authContext: { authType: string; scopes?: strin
 }
 
 /**
- * Resolve notebook query to notebook ID(s)
- * Supports searching by exact ID, name, or description
+ * Normalize text for fuzzy search matching
+ * Removes punctuation, normalizes whitespace, and converts to lowercase
  */
-export async function resolveNotebook(params: {
+function normalizeForSearch(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')   // Remove punctuation
+    .replace(/\s+/g, ' ')      // Normalize whitespace
+    .trim();                   // Clean edges
+}
+
+/**
+ * Resolve notebook query to notebook ID(s)
+ * Supports searching by exact ID, name, or description with fuzzy matching fallback
+ */
+export async function resolveNotebook(prisma: PrismaClient, params: {
   userId: string;
   notebookQuery: string;
 }): Promise<string[]> {
@@ -178,8 +190,34 @@ export async function resolveNotebook(params: {
     return exactMatches.map(nb => nb.id);
   }
   
-  // Return all partial matches
-  return notebooks.map(nb => nb.id);
+  // Return partial matches if found
+  if (notebooks.length > 0) {
+    return notebooks.map(nb => nb.id);
+  }
+  
+  // Fallback: Normalized fuzzy matching
+  // Fetch all notebooks for normalized matching when regular search fails
+  const allNotebooks = await prisma.notebook.findMany({
+    where: { userId },
+    select: { 
+      id: true, 
+      name: true,
+      description: true 
+    }
+  });
+  
+  const normalizedQuery = normalizeForSearch(notebookQuery);
+  const normalizedMatches = allNotebooks.filter(nb => {
+    const normalizedName = normalizeForSearch(nb.name);
+    const normalizedDesc = normalizeForSearch(nb.description || '');
+    
+    return normalizedQuery.includes(normalizedName) || 
+           normalizedName.includes(normalizedQuery) ||
+           normalizedQuery.includes(normalizedDesc) ||
+           normalizedDesc.includes(normalizedQuery);
+  });
+  
+  return normalizedMatches.map(nb => nb.id);
 }
 
 /**
@@ -208,7 +246,7 @@ export function buildNoteSearchFilters(params: {
     ];
   }
 
-  // Add domain filter
+  // Add domain filter (filter by domain within pageUrl)
   if (domain) {
     where.pageUrl = { contains: domain };
   }
@@ -232,6 +270,70 @@ export function buildNoteSearchFilters(params: {
   }
 
   return where;
+}
+
+/**
+ * Search notes with fuzzy matching fallback
+ * Returns notes matching the search query with regular search first, then normalized search
+ */
+export async function searchNotesWithFuzzyMatching(prisma: PrismaClient, params: {
+  userId: string;
+  search: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ id: string; noteTitle: string | null; content: string; pageUrl: string | null }[]> {
+  const { userId, search, limit = 50, offset = 0 } = params;
+  
+  // First try regular search
+  const regularResults = await prisma.note.findMany({
+    where: {
+      userId,
+      OR: [
+        { content: { contains: search, mode: 'insensitive' } },
+        { noteTitle: { contains: search, mode: 'insensitive' } }
+      ]
+    },
+    select: { 
+      id: true, 
+      noteTitle: true, 
+      content: true, 
+      pageUrl: true 
+    },
+    take: limit,
+    skip: offset,
+    orderBy: { createdAt: 'desc' }
+  });
+  
+  // If regular search found results, return them
+  if (regularResults.length > 0) {
+    return regularResults;
+  }
+  
+  // Fallback: Normalized fuzzy matching
+  // Get all notes for normalized search
+  const allNotes = await prisma.note.findMany({
+    where: { userId },
+    select: { 
+      id: true, 
+      noteTitle: true, 
+      content: true, 
+      pageUrl: true 
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+  
+  const normalizedQuery = normalizeForSearch(search);
+  const fuzzyMatches = allNotes.filter(note => {
+    const normalizedTitle = normalizeForSearch(note.noteTitle || '');
+    const normalizedContent = normalizeForSearch(note.content);
+    
+    return normalizedQuery.includes(normalizedTitle) ||
+           normalizedTitle.includes(normalizedQuery) ||
+           normalizedContent.includes(normalizedQuery);
+  });
+  
+  // Apply pagination to fuzzy results
+  return fuzzyMatches.slice(offset, offset + limit);
 }
 
 /**
