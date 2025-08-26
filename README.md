@@ -26,7 +26,7 @@ This MCP server provides Claude Code and other MCP clients with access to your N
 
 ### From npm (Recommended)
 ```bash
-npx @paul-bonneville-labs/neemee-mcp-server
+npx neemee-mcp-server
 ```
 
 ### Claude Desktop Configuration
@@ -38,7 +38,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "neemee": {
       "command": "npx",
-      "args": ["-y", "@paul-bonneville-labs/neemee-mcp-server"],
+      "args": ["-y", "neemee-mcp-server"],
       "env": {
         "NEEMEE_API_BASE_URL": "https://your-neemee-instance.com/api",
         "NEEMEE_API_KEY": "your-api-key-here"

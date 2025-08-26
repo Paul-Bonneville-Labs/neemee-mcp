@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Package Management
 - `npm install` - Install all dependencies
-- `npx @paul-bonneville-labs/neemee-mcp-server` - Run published version
+- `npx neemee-mcp-server` - Run published version
 
 ## Architecture Overview
 
