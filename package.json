@@ -27,6 +27,9 @@
     "url": "git+https://github.com/Paul-Bonneville-Labs/neemee-mcp-server.git"
   },
   "homepage": "https://github.com/Paul-Bonneville-Labs/neemee-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/Paul-Bonneville-Labs/neemee-mcp-server/issues"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
