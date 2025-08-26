@@ -11,7 +11,11 @@
     "build": "tsc",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:mock-api": "node test/mock-api-server.js",
+    "test:manual": "npm run build && node test/manual-test.js",
+    "test:integration": "npm run build && node test/integration-test.js",
+    "test:local": "npm run build && NEEMEE_API_BASE_URL=http://localhost:3001 NEEMEE_API_KEY=test-key-for-local-testing node dist/server.js"
   },
   "keywords": [
     "mcp",
