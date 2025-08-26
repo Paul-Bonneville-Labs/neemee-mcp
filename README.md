@@ -53,8 +53,7 @@ Add to your `claude_desktop_config.json`:
 ### Environment Variables
 
 - `NEEMEE_API_KEY` (required) - Your Neemee API key
-- `NEEMEE_API_BASE_URL` (optional) - Base URL for Neemee API (defaults to localhost for development)
-- `DATABASE_URL` (optional) - Direct database connection for local development
+- `NEEMEE_API_BASE_URL` (optional) - Base URL for Neemee API (defaults to http://localhost:3000/api)
 
 ### Authentication
 
