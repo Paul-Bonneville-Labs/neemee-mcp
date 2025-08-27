@@ -86,7 +86,7 @@ export class NeemeeApiClient {
   private apiKey: string;
 
   constructor(baseUrl?: string, apiKey?: string) {
-    this.baseUrl = baseUrl || process.env.NEEMEE_API_BASE_URL || 'http://localhost:3000/api';
+    this.baseUrl = baseUrl || process.env.NEEMEE_API_BASE_URL || 'https://neemee.paulbonneville.com/mcp';
     this.apiKey = apiKey || process.env.NEEMEE_API_KEY || '';
     
     if (!this.apiKey) {
