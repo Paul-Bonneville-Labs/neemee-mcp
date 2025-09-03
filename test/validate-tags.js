@@ -54,7 +54,7 @@ async function validateTagFunctionality() {
     });
     console.log(`✅ Combined search returned ${combinedSearch.notes.length} notes`);
     
-    console.log('\\n🎉 All tag functionality validation tests passed!');
+    console.log('\n🎉 All tag functionality validation tests passed!');
     
   } catch (error) {
     console.error('❌ Validation failed:', error.message);

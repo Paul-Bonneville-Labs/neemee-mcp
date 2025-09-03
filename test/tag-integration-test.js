@@ -144,7 +144,7 @@ const tests = [
 tests.forEach((test, index) => {
   setTimeout(() => {
     console.log(`🔍 Testing: ${test.name}`);
-    server.stdin.write(JSON.stringify(test.request) + '\\n');
+    server.stdin.write(JSON.stringify(test.request) + '\n');
   }, index * 2000); // 2 second delays
 });
 
