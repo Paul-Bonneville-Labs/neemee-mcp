@@ -88,7 +88,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         uri: 'notes://list',
         mimeType: 'application/json',
         name: 'Notes List',
-        description: 'List of user notes with pagination, search, and notebook filtering support',
+        description: 'List of user notes with pagination, search, notebook, domain, and tag filtering support',
       },
       {
         uri: 'notebooks://list',
@@ -183,6 +183,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         const startDate = searchParams.get('start_date') || undefined;
         const endDate = searchParams.get('end_date') || undefined;
         const notebookQuery = searchParams.get('notebook')?.trim();
+        const tagsQuery = searchParams.get('tags')?.trim();
 
         const searchResult = await apiClient.searchNotes({
           query: search,
@@ -190,6 +191,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
           domain,
           startDate,
           endDate,
+          tags: tagsQuery,
           limit,
           page
         });
@@ -207,7 +209,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
                   domain,
                   startDate,
                   endDate,
-                  notebook: notebookQuery
+                  notebook: notebookQuery,
+                  tags: tagsQuery
                 }
               }, null, 2),
             },
@@ -478,7 +481,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_notes',
-        description: 'Search notes with advanced filters including notebook filtering. Empty query lists all notes.',
+        description: 'Search notes with advanced filters including notebook, domain, and tag filtering. Empty query lists all notes.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -501,6 +504,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             endDate: {
               type: 'string',
               description: 'Filter notes created before this date (ISO string)',
+            },
+            tags: {
+              type: 'string',
+              description: 'Filter by tags. Use comma-separated values for multiple tags (e.g. "GenAI,productivity")',
             },
             limit: {
               type: 'number',
@@ -709,6 +716,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           domain?: string;
           startDate?: string;
           endDate?: string;
+          tags?: string;
           limit?: number;
         });
       }

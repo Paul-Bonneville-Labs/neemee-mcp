@@ -62,6 +62,7 @@ export async function handleSearchNotes(
     domain?: string;
     startDate?: string;
     endDate?: string;
+    tags?: string;
     limit?: number;
   }
 ) {
@@ -72,7 +73,7 @@ export async function handleSearchNotes(
     );
   }
 
-  const { query, notebook, domain, startDate, endDate, limit } = args;
+  const { query, notebook, domain, startDate, endDate, tags, limit } = args;
   const searchLimit = Math.min(100, Math.max(1, limit || 20));
 
   try {
@@ -82,20 +83,29 @@ export async function handleSearchNotes(
       domain,
       startDate,
       endDate,
+      tags: tags?.trim(),
       limit: searchLimit
     });
 
     const queryDescription = query?.trim() ? `matching "${query}"` : 'found';
+    const filtersDescription = [
+      notebook ? `notebook(s) matching "${notebook}"` : null,
+      domain ? `domain "${domain}"` : null,
+      tags ? `tag(s) "${tags}"` : null
+    ].filter(Boolean).join(', ');
+    
     const resultText = result.notes.length > 0
-      ? `Found ${result.notes.length} notes ${queryDescription}${notebook ? ` in notebook(s) matching "${notebook}"` : ''}:\n\n` +
-        result.notes.map((note, index) => 
-          `${index + 1}. ${note.noteTitle} (${note.id})\n` +
-          `   Domain: ${note.domain || 'manual'}\n` +
-          `   Notebook: ${note.notebook?.name || 'None'}\n` +
-          `   Created: ${note.createdAt}\n` +
-          `   Content: ${note.content}\n`
-        ).join('\n')
-      : `No notes ${queryDescription}${notebook ? ` in notebook(s) matching "${notebook}"` : ''}`;
+      ? `Found ${result.notes.length} notes ${queryDescription}${filtersDescription ? ` with filters: ${filtersDescription}` : ''}:\n\n` +
+        result.notes.map((note, index) => {
+          const noteTags = note.frontmatter?.tags as string[] || [];
+          return `${index + 1}. ${note.noteTitle} (${note.id})\n` +
+            `   Domain: ${note.domain || 'manual'}\n` +
+            `   Notebook: ${note.notebook?.name || 'None'}\n` +
+            `   Tags: ${noteTags.length > 0 ? noteTags.join(', ') : 'None'}\n` +
+            `   Created: ${note.createdAt}\n` +
+            `   Content: ${note.content}\n`;
+        }).join('\n')
+      : `No notes ${queryDescription}${filtersDescription ? ` with filters: ${filtersDescription}` : ''}`;
 
     return {
       content: [
