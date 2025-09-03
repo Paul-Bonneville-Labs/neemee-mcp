@@ -39,6 +39,7 @@ export interface SearchNotesParams {
   domain?: string;
   startDate?: string;
   endDate?: string;
+  tags?: string | string[];
   limit?: number;
   page?: number;
 }
@@ -147,6 +148,10 @@ export class NeemeeApiClient {
     if (params.domain) searchParams.set('domain', params.domain);
     if (params.startDate) searchParams.set('startDate', params.startDate);
     if (params.endDate) searchParams.set('endDate', params.endDate);
+    if (params.tags) {
+      const tagsValue = Array.isArray(params.tags) ? params.tags.join(',') : params.tags;
+      searchParams.set('tags', tagsValue);
+    }
     if (params.limit) searchParams.set('limit', params.limit.toString());
     if (params.page) searchParams.set('page', params.page.toString());
 

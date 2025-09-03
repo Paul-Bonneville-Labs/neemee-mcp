@@ -20,10 +20,33 @@ const mockResponses = {
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:00Z',
         domain: 'example.com',
-        notebook: { id: 'nb-123', name: 'Test Notebook' }
+        notebook: { id: 'nb-123', name: 'Test Notebook' },
+        frontmatter: { tags: ['GenAI', 'testing', 'mcp'] }
+      },
+      {
+        id: 'note-456',
+        noteTitle: 'Productivity Tips',
+        content: '# Productivity Tips\n\nSome useful productivity tips.',
+        pageUrl: 'https://productivity.com',
+        createdAt: '2024-01-02T00:00:00Z',
+        updatedAt: '2024-01-02T00:00:00Z',
+        domain: 'productivity.com',
+        notebook: { id: 'nb-456', name: 'Work Notebook' },
+        frontmatter: { tags: ['productivity', 'work', 'tips'] }
+      },
+      {
+        id: 'note-789',
+        noteTitle: 'Machine Learning Basics',
+        content: '# ML Basics\n\nIntroduction to machine learning concepts.',
+        pageUrl: null,
+        createdAt: '2024-01-03T00:00:00Z',
+        updatedAt: '2024-01-03T00:00:00Z',
+        domain: null,
+        notebook: { id: 'nb-123', name: 'Test Notebook' },
+        frontmatter: { tags: ['GenAI', 'machine-learning', 'education'] }
       }
     ],
-    pagination: { total: 1, page: 1, limit: 20 }
+    pagination: { total: 3, page: 1, limit: 20 }
   },
   'GET /notebooks': {
     notebooks: [

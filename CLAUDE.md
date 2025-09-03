@@ -35,7 +35,7 @@ This is a **Model Context Protocol (MCP) server** for the Neemee personal knowle
 ### Key Features
 
 **Resources (Read Access):**
-- `notes://list` - Paginated note listing with search/filtering
+- `notes://list` - Paginated note listing with comprehensive search/filtering (supports text, notebook, domain, and tag filters)
 - `notes://{id}` - Individual note access
 - `notebooks://list` - Notebook listing with note counts
 - `notebooks://{id}` - Individual notebook details
@@ -44,9 +44,28 @@ This is a **Model Context Protocol (MCP) server** for the Neemee personal knowle
 
 **Tools (Write Operations):**
 - `create_note`, `update_note`, `delete_note` - Note CRUD operations
-- `search_notes` - Advanced search with notebook filtering  
+- `search_notes` - Advanced search with comprehensive filtering (notebook, domain, tag, date range, and text search)
 - `create_notebook`, `update_notebook`, `delete_notebook` - Notebook management
 - `search_notebooks` - Notebook search functionality
+
+### Tag-Based Search Features
+
+**Tag Support:**
+- **Tag Storage**: Tags are stored in note frontmatter as `tags: []` array in JSONB format
+- **Tag Filtering**: Both tools and resources support tag-based filtering
+- **Multiple Tags**: Support for searching by single tag or comma-separated multiple tags
+- **Combined Filters**: Tags can be combined with other filters (notebook, domain, date range, text query)
+
+**Usage Examples:**
+- Single tag search: `search_notes` with `tags: "GenAI"`
+- Multiple tags: `search_notes` with `tags: "GenAI,productivity,automation"`
+- Combined filtering: `search_notes` with `tags: "AI"` + `notebook: "Work"` + `domain: "github.com"`
+- Resource access: `notes://list?tags=GenAI&notebook=work&limit=10`
+
+**Tag Display:**
+- Search results include tag information extracted from frontmatter
+- Tags displayed in readable format: `Tags: GenAI, productivity, automation`
+- Empty tag arrays show as `Tags: None`
 
 ### Authentication & Permissions
 
@@ -77,7 +96,16 @@ The MCP server acts as a client to the Neemee API:
 
 ## Testing & Validation
 
-No specific test framework is configured. Use the MCP protocol directly or through Claude Desktop for integration testing.
+**Available Test Scripts:**
+- `npm run test:mock-api` - Start mock API server for testing
+- `node test/validate-tags.js` - Validate tag search functionality
+- `node test/tag-integration-test.js` - Comprehensive tag feature testing
+- `npm run test:integration` - Full integration testing
+
+**Tag Testing:**
+- Mock API server includes sample notes with tags in frontmatter
+- Test coverage includes single tag, multiple tags, and combined filter scenarios
+- Validates both MCP tools and resources support tag parameters
 
 ## Deployment
 
