@@ -116,6 +116,36 @@ export class NeemeeApiClient {
     return this.requestIdCounter++;
   }
 
+  // Helper functions for response parsing
+  private parseJsonResponse<T>(responseText: string, operation: string): T {
+    try {
+      return JSON.parse(responseText);
+    } catch (err) {
+      throw new Error(`Failed to parse JSON in ${operation} response: ${(err as Error).message}`);
+    }
+  }
+
+  private parseToolResponse<T>(response: { content: Array<{ type: string; text: string }> }, operation: string): T {
+    return this.parseJsonResponse<T>(response.content[0].text, operation);
+  }
+
+  private parseResourceResponse<T>(response: { contents: Array<{ uri: string; mimeType: string; text: string }> }, operation: string): T {
+    return this.parseJsonResponse<T>(response.contents[0].text, operation);
+  }
+
+  private parseResponseText(responseText: string, patterns: { [key: string]: RegExp }): { [key: string]: string } {
+    const results: { [key: string]: string } = {};
+    
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const match = responseText.match(pattern);
+      if (match) {
+        results[key] = match[1];
+      }
+    }
+    
+    return results;
+  }
+
   private async makeJsonRpcRequest<T>(method: string, params?: any): Promise<T> {
     const request = {
       jsonrpc: "2.0" as const,
@@ -217,9 +247,7 @@ export class NeemeeApiClient {
       arguments: searchArgs
     });
 
-    // Parse the response from the tool content
-    const result = JSON.parse(response.content[0].text);
-    return result;
+    return this.parseToolResponse(response, 'searchNotes');
   }
 
   async getNote(id: string): Promise<NeemeeNote> {
@@ -229,8 +257,7 @@ export class NeemeeApiClient {
       uri: `notes://${id}`
     });
 
-    // Parse the response from the resource content
-    return JSON.parse(response.contents[0].text);
+    return this.parseResourceResponse(response, 'getNote');
   }
 
   async createNote(params: CreateNoteParams): Promise<{
@@ -246,21 +273,22 @@ export class NeemeeApiClient {
       arguments: params
     });
 
-    // Extract the note information from the response text
     const responseText = response.content[0].text;
-    const noteIdMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
-    const titleMatch = responseText.match(/note "([^"]+)"/);
-    const notebookMatch = responseText.match(/in notebook "([^"]+)"/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      title: /note "([^"]+)"/,
+      notebook: /in notebook "([^"]+)"/
+    });
 
-    if (!noteIdMatch || !titleMatch) {
+    if (!results.id || !results.title) {
       throw new Error('Failed to parse create note response');
     }
 
     return {
-      id: noteIdMatch[1],
-      noteTitle: titleMatch[1],
-      notebookId: null, // Will be set by server if notebook was specified
-      notebook: notebookMatch ? { name: notebookMatch[1] } : null
+      id: results.id,
+      noteTitle: results.title,
+      notebookId: null,
+      notebook: results.notebook ? { name: results.notebook } : null
     };
   }
 
@@ -275,18 +303,19 @@ export class NeemeeApiClient {
       arguments: params
     });
 
-    // Extract the note information from the response text
     const responseText = response.content[0].text;
-    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)\)/);
-    const titleMatch = responseText.match(/note "([^"]+)"/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      title: /note "([^"]+)"/
+    });
 
-    if (!idMatch || !titleMatch) {
+    if (!results.id || !results.title) {
       throw new Error('Failed to parse update note response');
     }
 
     return {
-      id: idMatch[1],
-      noteTitle: titleMatch[1]
+      id: results.id,
+      noteTitle: results.title
     };
   }
 
@@ -301,18 +330,19 @@ export class NeemeeApiClient {
       arguments: { id, confirm: true }
     });
 
-    // Extract the note information from the response text
     const responseText = response.content[0].text;
-    const titleMatch = responseText.match(/note "([^"]+)"/);
-    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      title: /note "([^"]+)"/
+    });
 
-    if (!idMatch || !titleMatch) {
+    if (!results.id || !results.title) {
       throw new Error('Failed to parse delete note response');
     }
 
     return {
-      id: idMatch[1],
-      noteTitle: titleMatch[1]
+      id: results.id,
+      noteTitle: results.title
     };
   }
 
@@ -338,9 +368,7 @@ export class NeemeeApiClient {
       arguments: searchArgs
     });
 
-    // Parse the response from the tool content
-    const result = JSON.parse(response.content[0].text);
-    return result;
+    return this.parseToolResponse(response, 'searchNotebooks');
   }
 
   async getNotebook(id: string): Promise<NeemeeNotebook> {
@@ -350,8 +378,7 @@ export class NeemeeApiClient {
       uri: `notebooks://${id}`
     });
 
-    // Parse the response from the resource content
-    return JSON.parse(response.contents[0].text);
+    return this.parseResourceResponse(response, 'getNotebook');
   }
 
   async createNotebook(params: CreateNotebookParams): Promise<{
@@ -366,18 +393,19 @@ export class NeemeeApiClient {
       arguments: params
     });
 
-    // Extract the notebook information from the response text
     const responseText = response.content[0].text;
-    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
-    const nameMatch = responseText.match(/notebook "([^"]+)"/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      name: /notebook "([^"]+)"/
+    });
 
-    if (!idMatch || !nameMatch) {
+    if (!results.id || !results.name) {
       throw new Error('Failed to parse create notebook response');
     }
 
     return {
-      id: idMatch[1],
-      name: nameMatch[1],
+      id: results.id,
+      name: results.name,
       description: params.description || null
     };
   }
@@ -393,18 +421,19 @@ export class NeemeeApiClient {
       arguments: params
     });
 
-    // Extract the notebook information from the response text
     const responseText = response.content[0].text;
-    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)\)/);
-    const nameMatch = responseText.match(/notebook "([^"]+)"/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      name: /notebook "([^"]+)"/
+    });
 
-    if (!idMatch || !nameMatch) {
+    if (!results.id || !results.name) {
       throw new Error('Failed to parse update notebook response');
     }
 
     return {
-      id: idMatch[1],
-      name: nameMatch[1]
+      id: results.id,
+      name: results.name
     };
   }
 
@@ -420,20 +449,21 @@ export class NeemeeApiClient {
       arguments: { id, confirm: true }
     });
 
-    // Extract the notebook information from the response text
     const responseText = response.content[0].text;
-    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
-    const nameMatch = responseText.match(/notebook "([^"]+)"/);
-    const countMatch = responseText.match(/(\d+) notes/);
+    const results = this.parseResponseText(responseText, {
+      id: /ID: ([a-zA-Z0-9-]+)/,
+      name: /notebook "([^"]+)"/,
+      count: /(\d+) notes/
+    });
 
-    if (!idMatch || !nameMatch) {
+    if (!results.id || !results.name) {
       throw new Error('Failed to parse delete notebook response');
     }
 
     return {
-      id: idMatch[1],
-      name: nameMatch[1],
-      noteCount: countMatch ? parseInt(countMatch[1]) : 0
+      id: results.id,
+      name: results.name,
+      noteCount: results.count ? parseInt(results.count) : 0
     };
   }
 
@@ -450,8 +480,7 @@ export class NeemeeApiClient {
       uri: 'stats://overview'
     });
 
-    // Parse the response from the resource content
-    return JSON.parse(response.contents[0].text);
+    return this.parseResourceResponse(response, 'getStats');
   }
 
   // Recent activity
@@ -470,8 +499,7 @@ export class NeemeeApiClient {
       uri: 'collections://recent'
     });
 
-    // Parse the response from the resource content
-    return JSON.parse(response.contents[0].text);
+    return this.parseResourceResponse(response, 'getRecentActivity');
   }
 
   // Health check
@@ -494,7 +522,6 @@ export class NeemeeApiClient {
       uri: 'system://health'
     });
 
-    // Parse the response from the resource content
-    return JSON.parse(response.contents[0].text);
+    return this.parseResourceResponse(response, 'healthCheck');
   }
 }
