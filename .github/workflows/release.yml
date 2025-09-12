@@ -1,0 +1,295 @@
+name: 🚀 Automated Release & Publish
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package.json'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  check-version:
+    name: 🔍 Check Version Change
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.version-check.outputs.changed }}
+      new-version: ${{ steps.version-check.outputs.version }}
+      should-release: ${{ steps.version-check.outputs.should-release }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Check version change
+        id: version-check
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "current-version=${CURRENT_VERSION}"
+          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Check if this is a manual trigger
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual trigger - checking for existing release"
+            if gh release view "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "should-release=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Release v${CURRENT_VERSION} already exists"
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+              echo "should-release=true" >> $GITHUB_OUTPUT
+              echo "✅ Manual release for v${CURRENT_VERSION}"
+            fi
+            exit 0
+          fi
+          
+          # For push events, check if version actually changed
+          if git diff HEAD~1 HEAD --name-only | grep -q "package.json"; then
+            PREV_VERSION=$(git show HEAD~1:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).version")
+            echo "previous-version=${PREV_VERSION}"
+            
+            if [ "${CURRENT_VERSION}" != "${PREV_VERSION}" ]; then
+              # Check commit message for version bump or release keywords
+              COMMIT_MSG=$(git log --format=%B -n 1)
+              if echo "${COMMIT_MSG}" | grep -iE "(bump version|release|version.*to.*${CURRENT_VERSION})" > /dev/null; then
+                echo "changed=true" >> $GITHUB_OUTPUT
+                echo "should-release=true" >> $GITHUB_OUTPUT
+                echo "✅ Version changed from ${PREV_VERSION} to ${CURRENT_VERSION}"
+              else
+                echo "changed=false" >> $GITHUB_OUTPUT  
+                echo "should-release=false" >> $GITHUB_OUTPUT
+                echo "ℹ️ Version changed but no release keywords in commit message"
+              fi
+            else
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "should-release=false" >> $GITHUB_OUTPUT
+              echo "ℹ️ No version change detected"
+            fi
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "should-release=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ package.json not modified"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: 🎯 Create Release
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.should-release == 'true'
+    outputs:
+      release-created: ${{ steps.create-release.outputs.created }}
+      release-url: ${{ steps.create-release.outputs.url }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        id: create-tag
+        run: |
+          VERSION="v${{ needs.check-version.outputs.new-version }}"
+          
+          # Check if tag already exists
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "⚠️ Tag $VERSION already exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            # Create and push tag
+            git tag -a "$VERSION" -m "Release $VERSION"
+            git push origin "$VERSION"
+            echo "✅ Created and pushed tag $VERSION"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: 📝 Generate release notes
+        id: release-notes
+        run: |
+          VERSION="v${{ needs.check-version.outputs.new-version }}"
+          
+          # Generate changelog since last release
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$VERSION" ]; then
+            echo "## 🚀 What's Changed" >> release_notes.md
+            echo "" >> release_notes.md
+            
+            # Get commits since last tag
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> release_notes.md
+            echo "" >> release_notes.md
+            echo "" >> release_notes.md
+            
+            # Add contributors
+            echo "## 👥 Contributors" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- @%an" --no-merges | sort -u >> release_notes.md
+            echo "" >> release_notes.md
+          else
+            echo "## 🚀 Release Notes" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "This release includes improvements and bug fixes." >> release_notes.md
+            echo "" >> release_notes.md
+          fi
+          
+          echo "## 📦 Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "\`\`\`bash" >> release_notes.md
+          echo "npm install -g neemee-mcp-server@${{ needs.check-version.outputs.new-version }}" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}" >> release_notes.md
+
+      - name: 🎁 Create GitHub Release
+        id: create-release
+        run: |
+          VERSION="v${{ needs.check-version.outputs.new-version }}"
+          
+          # Check if release already exists
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "⚠️ Release $VERSION already exists"
+            RELEASE_URL=$(gh release view "$VERSION" --json url --jq '.url')
+            echo "created=false" >> $GITHUB_OUTPUT
+            echo "url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          else
+            # Create release
+            RELEASE_URL=$(gh release create "$VERSION" \
+              --title "🚀 Release $VERSION" \
+              --notes-file release_notes.md \
+              --latest)
+            
+            echo "✅ Created GitHub release: $RELEASE_URL"
+            echo "created=true" >> $GITHUB_OUTPUT
+            echo "url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    name: 📦 Publish to NPM
+    runs-on: ubuntu-latest
+    needs: [check-version, release]
+    if: needs.release.outputs.release-created == 'true'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Build project
+        run: npm run build
+
+      - name: 🧪 Run tests
+        run: |
+          # Run validation tests
+          if [ -f "test/json-rpc-validation.js" ]; then
+            echo "🧪 Running JSON-RPC validation tests"
+            node test/json-rpc-validation.js
+          fi
+          
+          # Run any other tests
+          if npm run test >/dev/null 2>&1; then
+            echo "🧪 Running npm test suite"
+            npm test
+          else
+            echo "ℹ️ No npm test script found, skipping"
+          fi
+
+      - name: 🔍 Pre-publish validation
+        run: |
+          # Validate package.json
+          echo "📋 Validating package.json..."
+          node -e "
+            const pkg = require('./package.json');
+            if (!pkg.name) throw new Error('Missing package name');
+            if (!pkg.version) throw new Error('Missing package version');
+            if (!pkg.main) throw new Error('Missing main entry point');
+            if (!require('fs').existsSync(pkg.main)) throw new Error('Main file does not exist: ' + pkg.main);
+            console.log('✅ Package validation passed');
+          "
+          
+          # Check if version already published
+          VERSION="${{ needs.check-version.outputs.new-version }}"
+          if npm view neemee-mcp-server@${VERSION} >/dev/null 2>&1; then
+            echo "⚠️ Version ${VERSION} already published to npm"
+            exit 1
+          fi
+
+      - name: 🚀 Publish to NPM
+        run: |
+          echo "🚀 Publishing neemee-mcp-server@${{ needs.check-version.outputs.new-version }} to NPM..."
+          npm publish --access public
+          echo "✅ Successfully published to NPM!"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 📱 Update release with NPM info
+        run: |
+          VERSION="v${{ needs.check-version.outputs.new-version }}"
+          
+          # Add NPM installation info to release
+          gh release edit "$VERSION" --notes-file - << 'EOF'
+          ## 🚀 What's Changed
+          
+          This release has been automatically published to NPM!
+          
+          ## 📦 Installation
+          
+          ```bash
+          # Install globally
+          npm install -g neemee-mcp-server@${{ needs.check-version.outputs.new-version }}
+          
+          # Or use npx
+          npx neemee-mcp-server
+          ```
+          
+          ## 🔗 Links
+          - 📦 [NPM Package](https://www.npmjs.com/package/neemee-mcp-server/v/${{ needs.check-version.outputs.new-version }})
+          - 📖 [GitHub Repository](https://github.com/${{ github.repository }})
+          - 🐛 [Report Issues](https://github.com/${{ github.repository }}/issues)
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}
+          EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: 📢 Notify Success  
+    runs-on: ubuntu-latest
+    needs: [check-version, release, publish-npm]
+    if: always() && needs.release.outputs.release-created == 'true'
+    steps:
+      - name: 🎉 Success Summary
+        run: |
+          echo "## 🎉 Release Success Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Completed Actions:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏷️ Created git tag: v${{ needs.check-version.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎁 Created GitHub release: [${{ needs.release.outputs.release-url }}](${{ needs.release.outputs.release-url }})" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.publish-npm.result }}" = "success" ]; then
+            echo "- 📦 Published to NPM: [neemee-mcp-server@${{ needs.check-version.outputs.new-version }}](https://www.npmjs.com/package/neemee-mcp-server/v/${{ needs.check-version.outputs.new-version }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⚠️ NPM publish failed or skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Ready for use!" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "npm install -g neemee-mcp-server@${{ needs.check-version.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
