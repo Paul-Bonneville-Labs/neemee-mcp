@@ -82,9 +82,26 @@ export interface AuthContext {
   scopes: string[];
 }
 
+export class NeemeeApiError extends Error {
+  public code: number;
+  public data?: unknown;
+
+  constructor(message: string, code: number, data?: unknown) {
+    super(message);
+    this.name = 'NeemeeApiError';
+    this.code = code;
+    this.data = data;
+  }
+
+  static fromJsonRpcError(error: { code: number; message: string; data?: unknown }): NeemeeApiError {
+    return new NeemeeApiError(error.message, error.code, error.data);
+  }
+}
+
 export class NeemeeApiClient {
   private baseUrl: string;
   private apiKey: string;
+  private requestIdCounter: number = 1;
 
   constructor(baseUrl?: string, apiKey?: string) {
     this.baseUrl = baseUrl || process.env.NEEMEE_API_BASE_URL || 'https://neemee.paulbonneville.com/mcp';
@@ -95,40 +112,79 @@ export class NeemeeApiClient {
     }
   }
 
-  private async makeRequest<T>(
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+  private generateRequestId(): number {
+    return this.requestIdCounter++;
+  }
+
+  private async makeJsonRpcRequest<T>(method: string, params?: any): Promise<T> {
+    const request = {
+      jsonrpc: "2.0" as const,
+      id: this.generateRequestId(),
+      method,
+      params: params || {}
+    };
     
-    const response = await fetch(url, {
-      ...options,
+    const response = await fetch(this.baseUrl, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
-        ...options.headers,
+        'MCP-Protocol-Version': '2025-06-18',
+        'Accept': 'application/json, text/event-stream'
       },
+      body: JSON.stringify(request)
     });
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`API request failed: ${response.status} ${response.statusText}: ${error}`);
+      throw new Error(`JSON-RPC request failed: ${response.status} ${response.statusText}: ${error}`);
     }
 
-    return response.json() as Promise<T>;
+    const jsonResponse = await response.json() as {
+      jsonrpc: string;
+      id: number;
+      result?: T;
+      error?: { code: number; message: string; data?: unknown };
+    };
+    
+    if (jsonResponse.error) {
+      throw NeemeeApiError.fromJsonRpcError(jsonResponse.error);
+    }
+
+    return jsonResponse.result!;
   }
 
-  // Authentication
+
+  // Authentication - now uses JSON-RPC initialize
   async validateAuth(): Promise<AuthContext> {
-    const response = await this.makeRequest<{
-      userId: string;
-      scopes: string[];
-    }>('/auth/validate');
+    const response = await this.makeJsonRpcRequest<{
+      protocolVersion: string;
+      capabilities: any;
+      serverInfo: any;
+      _auth?: {
+        userId: string;
+        scopes: string[];
+      };
+    }>('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {
+        resources: {},
+        tools: {}
+      },
+      clientInfo: {
+        name: 'neemee-mcp-client',
+        version: '1.0.0'
+      }
+    });
+
+    if (!response._auth) {
+      throw new Error('Authentication failed: No auth context in initialize response');
+    }
 
     return {
-      userId: response.userId,
+      userId: response._auth.userId,
       authType: 'api-key',
-      scopes: response.scopes,
+      scopes: response._auth.scopes,
     };
   }
 
@@ -141,25 +197,40 @@ export class NeemeeApiClient {
       limit: number;
     };
   }> {
-    const searchParams = new URLSearchParams();
+    const searchArgs: any = {};
     
-    if (params.query) searchParams.set('query', params.query);
-    if (params.notebook) searchParams.set('notebook', params.notebook);
-    if (params.domain) searchParams.set('domain', params.domain);
-    if (params.startDate) searchParams.set('startDate', params.startDate);
-    if (params.endDate) searchParams.set('endDate', params.endDate);
+    if (params.query) searchArgs.query = params.query;
+    if (params.notebook) searchArgs.notebook = params.notebook;
+    if (params.domain) searchArgs.domain = params.domain;
+    if (params.startDate) searchArgs.startDate = params.startDate;
+    if (params.endDate) searchArgs.endDate = params.endDate;
     if (params.tags) {
-      const tagsValue = Array.isArray(params.tags) ? params.tags.join(',') : params.tags;
-      searchParams.set('tags', tagsValue);
+      searchArgs.tags = Array.isArray(params.tags) ? params.tags.join(',') : params.tags;
     }
-    if (params.limit) searchParams.set('limit', params.limit.toString());
-    if (params.page) searchParams.set('page', params.page.toString());
+    if (params.limit) searchArgs.limit = params.limit;
+    if (params.page) searchArgs.page = params.page;
 
-    return this.makeRequest(`/notes?${searchParams.toString()}`);
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'search_notes',
+      arguments: searchArgs
+    });
+
+    // Parse the response from the tool content
+    const result = JSON.parse(response.content[0].text);
+    return result;
   }
 
   async getNote(id: string): Promise<NeemeeNote> {
-    return this.makeRequest(`/notes/${id}`);
+    const response = await this.makeJsonRpcRequest<{
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }>('resources/read', {
+      uri: `notes://${id}`
+    });
+
+    // Parse the response from the resource content
+    return JSON.parse(response.contents[0].text);
   }
 
   async createNote(params: CreateNoteParams): Promise<{
@@ -168,30 +239,81 @@ export class NeemeeApiClient {
     notebookId: string | null;
     notebook?: { name: string } | null;
   }> {
-    return this.makeRequest('/notes', {
-      method: 'POST',
-      body: JSON.stringify(params),
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'create_note',
+      arguments: params
     });
+
+    // Extract the note information from the response text
+    const responseText = response.content[0].text;
+    const noteIdMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
+    const titleMatch = responseText.match(/note "([^"]+)"/);
+    const notebookMatch = responseText.match(/in notebook "([^"]+)"/);
+
+    if (!noteIdMatch || !titleMatch) {
+      throw new Error('Failed to parse create note response');
+    }
+
+    return {
+      id: noteIdMatch[1],
+      noteTitle: titleMatch[1],
+      notebookId: null, // Will be set by server if notebook was specified
+      notebook: notebookMatch ? { name: notebookMatch[1] } : null
+    };
   }
 
   async updateNote(params: UpdateNoteParams): Promise<{
     id: string;
     noteTitle: string;
   }> {
-    const { id, ...updateData } = params;
-    return this.makeRequest(`/notes/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updateData),
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'update_note',
+      arguments: params
     });
+
+    // Extract the note information from the response text
+    const responseText = response.content[0].text;
+    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)\)/);
+    const titleMatch = responseText.match(/note "([^"]+)"/);
+
+    if (!idMatch || !titleMatch) {
+      throw new Error('Failed to parse update note response');
+    }
+
+    return {
+      id: idMatch[1],
+      noteTitle: titleMatch[1]
+    };
   }
 
   async deleteNote(id: string): Promise<{
     id: string;
     noteTitle: string;
   }> {
-    return this.makeRequest(`/notes/${id}`, {
-      method: 'DELETE',
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'delete_note',
+      arguments: { id, confirm: true }
     });
+
+    // Extract the note information from the response text
+    const responseText = response.content[0].text;
+    const titleMatch = responseText.match(/note "([^"]+)"/);
+    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
+
+    if (!idMatch || !titleMatch) {
+      throw new Error('Failed to parse delete note response');
+    }
+
+    return {
+      id: idMatch[1],
+      noteTitle: titleMatch[1]
+    };
   }
 
   // Notebooks
@@ -203,17 +325,33 @@ export class NeemeeApiClient {
       limit: number;
     };
   }> {
-    const searchParams = new URLSearchParams();
+    const searchArgs: any = {};
     
-    if (params.query) searchParams.set('query', params.query);
-    if (params.limit) searchParams.set('limit', params.limit.toString());
-    if (params.page) searchParams.set('page', params.page.toString());
+    if (params.query) searchArgs.query = params.query;
+    if (params.limit) searchArgs.limit = params.limit;
+    if (params.page) searchArgs.page = params.page;
 
-    return this.makeRequest(`/notebooks?${searchParams.toString()}`);
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'search_notebooks',
+      arguments: searchArgs
+    });
+
+    // Parse the response from the tool content
+    const result = JSON.parse(response.content[0].text);
+    return result;
   }
 
   async getNotebook(id: string): Promise<NeemeeNotebook> {
-    return this.makeRequest(`/notebooks/${id}`);
+    const response = await this.makeJsonRpcRequest<{
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }>('resources/read', {
+      uri: `notebooks://${id}`
+    });
+
+    // Parse the response from the resource content
+    return JSON.parse(response.contents[0].text);
   }
 
   async createNotebook(params: CreateNotebookParams): Promise<{
@@ -221,21 +359,53 @@ export class NeemeeApiClient {
     name: string;
     description: string | null;
   }> {
-    return this.makeRequest('/notebooks', {
-      method: 'POST',
-      body: JSON.stringify(params),
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'create_notebook',
+      arguments: params
     });
+
+    // Extract the notebook information from the response text
+    const responseText = response.content[0].text;
+    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
+    const nameMatch = responseText.match(/notebook "([^"]+)"/);
+
+    if (!idMatch || !nameMatch) {
+      throw new Error('Failed to parse create notebook response');
+    }
+
+    return {
+      id: idMatch[1],
+      name: nameMatch[1],
+      description: params.description || null
+    };
   }
 
   async updateNotebook(params: UpdateNotebookParams): Promise<{
     id: string;
     name: string;
   }> {
-    const { id, ...updateData } = params;
-    return this.makeRequest(`/notebooks/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updateData),
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'update_notebook',
+      arguments: params
     });
+
+    // Extract the notebook information from the response text
+    const responseText = response.content[0].text;
+    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)\)/);
+    const nameMatch = responseText.match(/notebook "([^"]+)"/);
+
+    if (!idMatch || !nameMatch) {
+      throw new Error('Failed to parse update notebook response');
+    }
+
+    return {
+      id: idMatch[1],
+      name: nameMatch[1]
+    };
   }
 
   async deleteNotebook(id: string): Promise<{
@@ -243,9 +413,28 @@ export class NeemeeApiClient {
     name: string;
     noteCount: number;
   }> {
-    return this.makeRequest(`/notebooks/${id}`, {
-      method: 'DELETE',
+    const response = await this.makeJsonRpcRequest<{
+      content: Array<{ type: string; text: string }>;
+    }>('tools/call', {
+      name: 'delete_notebook',
+      arguments: { id, confirm: true }
     });
+
+    // Extract the notebook information from the response text
+    const responseText = response.content[0].text;
+    const idMatch = responseText.match(/ID: ([a-zA-Z0-9-]+)/);
+    const nameMatch = responseText.match(/notebook "([^"]+)"/);
+    const countMatch = responseText.match(/(\d+) notes/);
+
+    if (!idMatch || !nameMatch) {
+      throw new Error('Failed to parse delete notebook response');
+    }
+
+    return {
+      id: idMatch[1],
+      name: nameMatch[1],
+      noteCount: countMatch ? parseInt(countMatch[1]) : 0
+    };
   }
 
   // Statistics
@@ -255,7 +444,14 @@ export class NeemeeApiClient {
     topDomains: Array<{ domain: string; count: number }>;
     generatedAt: string;
   }> {
-    return this.makeRequest('/stats');
+    const response = await this.makeJsonRpcRequest<{
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }>('resources/read', {
+      uri: 'stats://overview'
+    });
+
+    // Parse the response from the resource content
+    return JSON.parse(response.contents[0].text);
   }
 
   // Recent activity
@@ -268,7 +464,14 @@ export class NeemeeApiClient {
     recentNotes: NeemeeNote[];
     recentNotebooks: NeemeeNotebook[];
   }> {
-    return this.makeRequest('/activity/recent');
+    const response = await this.makeJsonRpcRequest<{
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }>('resources/read', {
+      uri: 'collections://recent'
+    });
+
+    // Parse the response from the resource content
+    return JSON.parse(response.contents[0].text);
   }
 
   // Health check
@@ -285,6 +488,13 @@ export class NeemeeApiClient {
       capabilities: string[];
     };
   }> {
-    return this.makeRequest('/health');
+    const response = await this.makeJsonRpcRequest<{
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    }>('resources/read', {
+      uri: 'system://health'
+    });
+
+    // Parse the response from the resource content
+    return JSON.parse(response.contents[0].text);
   }
 }
