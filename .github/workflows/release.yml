@@ -80,7 +80,7 @@ jobs:
                 }
                 
                 console.log(compareVersions(current, previous) > 0 ? 'true' : 'false');
-              " 2>/dev/null || echo "true")
+              " 2>/dev/null || echo "false")
               
               if [ "${VERSION_INCREASED}" = "true" ]; then
                 echo "changed=true" >> $GITHUB_OUTPUT
