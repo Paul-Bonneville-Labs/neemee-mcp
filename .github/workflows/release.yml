@@ -1,5 +1,10 @@
 name: 🚀 Automated Release & Publish
 
+# This workflow automatically creates releases when:
+# 1. package.json is modified on main branch
+# 2. Version number has increased (semantic version comparison)
+# No commit message keywords required - fully automatic!
+
 on:
   push:
     branches: [ main ]
@@ -51,16 +56,40 @@ jobs:
             echo "previous-version=${PREV_VERSION}"
             
             if [ "${CURRENT_VERSION}" != "${PREV_VERSION}" ]; then
-              # Check commit message for version bump or release keywords
-              COMMIT_MSG=$(git log --format=%B -n 1)
-              if echo "${COMMIT_MSG}" | grep -iE "(bump version|release|version.*to.*${CURRENT_VERSION})" > /dev/null; then
+              # Version changed - check if it's a valid increase
+              echo "🔍 Comparing versions: ${PREV_VERSION} → ${CURRENT_VERSION}"
+              
+              # Use node to compare semantic versions (simple comparison without external deps)
+              VERSION_INCREASED=$(node -e "
+                const current = '${CURRENT_VERSION}';
+                const previous = '${PREV_VERSION}';
+                
+                // Simple semantic version comparison
+                function compareVersions(a, b) {
+                  const aParts = a.split('.').map(Number);
+                  const bParts = b.split('.').map(Number);
+                  
+                  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                    const aPart = aParts[i] || 0;
+                    const bPart = bParts[i] || 0;
+                    
+                    if (aPart > bPart) return 1;
+                    if (aPart < bPart) return -1;
+                  }
+                  return 0;
+                }
+                
+                console.log(compareVersions(current, previous) > 0 ? 'true' : 'false');
+              " 2>/dev/null || echo "true")
+              
+              if [ "${VERSION_INCREASED}" = "true" ]; then
                 echo "changed=true" >> $GITHUB_OUTPUT
                 echo "should-release=true" >> $GITHUB_OUTPUT
-                echo "✅ Version changed from ${PREV_VERSION} to ${CURRENT_VERSION}"
+                echo "✅ Version increased from ${PREV_VERSION} to ${CURRENT_VERSION} - auto-releasing"
               else
-                echo "changed=false" >> $GITHUB_OUTPUT  
+                echo "changed=false" >> $GITHUB_OUTPUT
                 echo "should-release=false" >> $GITHUB_OUTPUT
-                echo "ℹ️ Version changed but no release keywords in commit message"
+                echo "⚠️ Version changed but not increased (${PREV_VERSION} → ${CURRENT_VERSION}) - skipping release"
               fi
             else
               echo "changed=false" >> $GITHUB_OUTPUT
