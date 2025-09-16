@@ -297,6 +297,27 @@ Claude Code automatically discovers and manages MCP servers. Simply install the 
 npm install -g neemee-mcp-server
 ```
 
+#### Upgrading
+
+To upgrade an existing installation to the latest version:
+
+**Check your current version:**
+```bash
+npm list -g --depth=0 | grep neemee-mcp-server
+```
+
+**Check the latest available version:**
+```bash
+npm info neemee-mcp-server version
+```
+
+**Upgrade to the latest version:**
+```bash
+npm install -g neemee-mcp-server@latest
+```
+
+> **Note:** After upgrading, you may need to restart Claude Code or your MCP client for the changes to take effect.
+
 #### Custom MCP Client Integration
 
 For developers building custom MCP clients:
