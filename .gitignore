@@ -36,4 +36,7 @@ logs/
 .env.example
 .env.local
 .env.staging
-.env.production.worktrees/
+.env.production
+
+# Git worktrees
+.worktrees/
