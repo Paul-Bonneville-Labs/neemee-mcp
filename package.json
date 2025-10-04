@@ -1,16 +1,22 @@
 {
   "name": "neemee-mcp-server",
-  "version": "2.0.0",
-  "description": "TypeScript client library for Neemee MCP servers using the official Model Context Protocol SDK",
+  "version": "2.1.0",
+  "description": "MCP server bridge and TypeScript client library for Neemee personal knowledge management system",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "neemee-mcp-server": "dist/server.js"
+  },
   "scripts": {
     "build": "tsc",
+    "dev": "tsx src/server.ts",
+    "start": "node dist/server.js",
     "prepublishOnly": "npm run build",
     "test": "npm run test:client && npm run test:legacy",
     "test:client": "npm run build && node test/client.test.js",
     "test:legacy": "npm run build && node test/legacy.test.js",
+    "test:server": "npm run build && NEEMEE_API_BASE_URL=http://localhost:3001 NEEMEE_API_KEY=test-key node dist/server.js",
     "release:patch": "npm version patch && git push && git push --tags",
     "release:minor": "npm version minor && git push && git push --tags",
     "release:major": "npm version major && git push && git push --tags"
