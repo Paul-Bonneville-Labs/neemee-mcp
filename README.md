@@ -6,6 +6,8 @@ A TypeScript client library for connecting to Neemee MCP servers using the offic
 
 This library provides a convenient interface for interacting with Neemee personal knowledge management systems through the Model Context Protocol (MCP). It supports both HTTP and STDIO transport modes and includes full TypeScript support.
 
+**⚠️ Important Note:** Despite the package name `neemee-mcp-server`, this is actually a **client library** that acts as a local bridge to connect MCP clients (like Claude Desktop) to the remote Neemee MCP server. The naming will be addressed in a future version to avoid confusion.
+
 ## Installation
 
 ```bash
@@ -369,10 +371,53 @@ const resourceNotes = await client.resources.listNotes({
 
 ## Configuration
 
+## Claude Desktop Configuration
+
+### Method 1: HTTP Connection via Proxy (Recommended)
+
+Configure Claude Desktop to connect to the Neemee MCP server using the `mcp-proxy` package:
+
+```json
+{
+  "mcpServers": {
+    "neemee": {
+      "command": "npx",
+      "args": ["-y", "mcp-proxy"],
+      "env": {
+        "MCP_SERVER_URL": "https://neemee.paulbonneville.com/mcp"
+      }
+    }
+  }
+}
+```
+
+**Authentication:** Uses Clerk OAuth - no API key needed. Authentication is handled through the OAuth flow. The `mcp-proxy` package bridges Claude Desktop's STDIO interface with the HTTP MCP server.
+
+### Method 2: Local STDIO Bridge
+
+Use this package as a local bridge for STDIO transport:
+
+```json
+{
+  "mcpServers": {
+    "neemee-local": {
+      "command": "npx",
+      "args": ["-y", "neemee-mcp-server"],
+      "env": {
+        "NEEMEE_API_KEY": "your-api-key-here",
+        "NEEMEE_API_BASE_URL": "https://neemee.paulbonneville.com/mcp"
+      }
+    }
+  }
+}
+```
+
+**Authentication:** Uses API key authentication. Get your API key from Neemee settings.
+
 ### Environment Variables
 
-- `NEEMEE_API_KEY` - Your Neemee API key (required)
-- `NEEMEE_API_BASE_URL` - Base URL for Neemee API (optional, defaults to http://localhost:3000/api)
+- `NEEMEE_API_KEY` - Your Neemee API key (required for STDIO mode)
+- `NEEMEE_API_BASE_URL` - Base URL for Neemee API (defaults to https://neemee.paulbonneville.com/mcp)
 
 ### Authentication Scopes
 
