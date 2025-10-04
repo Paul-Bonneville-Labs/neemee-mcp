@@ -44,9 +44,20 @@ class NeemeeMcpServerBridge {
       }
     );
 
-    // Connect to frontend MCP server with URL validation
+    // Connect to frontend MCP server with URL validation and authentication
     const frontendUrl = this.validateAndGetFrontendUrl();
-    this.transport = new SSEClientTransport(frontendUrl);
+    const apiKey = this.getApiKey();
+    
+    // Create custom fetch function with authentication
+    const authenticatedFetch = (url: string | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${apiKey}`);
+      return fetch(url, { ...init, headers });
+    };
+    
+    this.transport = new SSEClientTransport(frontendUrl, {
+      fetch: authenticatedFetch
+    });
     
     this.mcpClient = new Client({
       name: 'neemee-mcp-bridge',
@@ -74,6 +85,17 @@ class NeemeeMcpServerBridge {
     } catch (error) {
       throw new Error(`Invalid NEEMEE_API_BASE_URL: "${frontendUrlString}". ${error instanceof Error ? error.message : 'Invalid URL format'}`);
     }
+  }
+
+  private getApiKey(): string {
+    const apiKey = process.env.NEEMEE_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'NEEMEE_API_KEY environment variable is required to authenticate with the frontend MCP server. ' +
+        'Please set NEEMEE_API_KEY to your Neemee API key.'
+      );
+    }
+    return apiKey;
   }
 
   async initialize(maxRetries: number = 3, retryDelayMs: number = 1000) {
@@ -194,6 +216,11 @@ class NeemeeMcpServerBridge {
           console.error('- For development: NEEMEE_API_BASE_URL=http://localhost:3000/mcp');
           console.error('- For production: NEEMEE_API_BASE_URL=https://neemee.paulbonneville.com/mcp');
           console.error('- Or set NODE_ENV=development to use localhost defaults');
+        }
+        if (error.message.includes('NEEMEE_API_KEY')) {
+          console.error('\nAuthentication help:');
+          console.error('- Set NEEMEE_API_KEY=your-api-key-here');
+          console.error('- Get your API key from your Neemee dashboard');
         }
       } else {
         console.error('Failed to start Neemee MCP Server Bridge:', error);
