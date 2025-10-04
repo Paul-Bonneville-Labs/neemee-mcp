@@ -12,6 +12,15 @@ import {
   McpError,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Get version from package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+const VERSION = packageJson.version;
 
 /**
  * Thin MCP server bridge that connects to frontend MCP server
@@ -25,7 +34,7 @@ class NeemeeMcpServerBridge {
     this.server = new Server(
       {
         name: 'neemee-mcp-server',
-        version: '2.1.0',
+        version: VERSION,
       },
       {
         capabilities: {
@@ -41,7 +50,7 @@ class NeemeeMcpServerBridge {
     
     this.mcpClient = new Client({
       name: 'neemee-mcp-bridge',
-      version: '2.1.0'
+      version: VERSION
     }, {
       capabilities: {}
     });
