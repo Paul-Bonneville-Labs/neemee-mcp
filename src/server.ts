@@ -3,7 +3,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -28,7 +28,7 @@ const VERSION = packageJson.version;
 class NeemeeMcpServerBridge {
   private server: Server;
   private mcpClient: Client;
-  private transport: SSEClientTransport;
+  private transport: StreamableHTTPClientTransport;
 
   constructor() {
     this.server = new Server(
@@ -49,13 +49,14 @@ class NeemeeMcpServerBridge {
     const apiKey = this.getApiKey();
     
     // Create custom fetch function with authentication
-    const authenticatedFetch = (url: string | URL, init?: RequestInit) => {
+    const authenticatedFetch = (url: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       headers.set('Authorization', `Bearer ${apiKey}`);
       return fetch(url, { ...init, headers });
     };
     
-    this.transport = new SSEClientTransport(frontendUrl, {
+    // Create streamable HTTP transport with authenticated fetch
+    this.transport = new StreamableHTTPClientTransport(frontendUrl, {
       fetch: authenticatedFetch
     });
     
