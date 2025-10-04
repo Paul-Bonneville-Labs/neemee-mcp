@@ -36,7 +36,11 @@ class NeeemeeMcpServerBridge {
     );
 
     // Connect to frontend MCP server
-    const frontendUrl = process.env.NEEMEE_API_BASE_URL || 'http://localhost:3000/mcp';
+    // Default to production URL for published package, localhost for development
+    const defaultUrl = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev'
+      ? 'http://localhost:3000/mcp'
+      : 'https://neemee.paulbonneville.com/mcp';
+    const frontendUrl = process.env.NEEMEE_API_BASE_URL || defaultUrl;
     this.transport = new SSEClientTransport(new URL(frontendUrl));
     
     this.mcpClient = new Client({
@@ -114,7 +118,7 @@ class NeeemeeMcpServerBridge {
     // Then start STDIO server for Claude Code
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Neemee MCP Server Bridge started and connected to frontend MCP server');
+    console.log('Neemee MCP Server Bridge started and connected to frontend MCP server');
   }
 }
 

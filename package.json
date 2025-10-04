@@ -10,13 +10,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/server.ts",
+    "dev": "NODE_ENV=development tsx src/server.ts",
     "start": "node dist/server.js",
     "prepublishOnly": "npm run build",
     "test": "npm run test:client && npm run test:legacy",
     "test:client": "npm run build && node test/client.test.js",
     "test:legacy": "npm run build && node test/legacy.test.js",
-    "test:server": "npm run build && NEEMEE_API_BASE_URL=http://localhost:3001 NEEMEE_API_KEY=test-key node dist/server.js",
+    "test:server": "npm run build && NODE_ENV=development NEEMEE_API_KEY=test-key node dist/server.js",
     "release:patch": "npm version patch && git push && git push --tags",
     "release:minor": "npm version minor && git push && git push --tags",
     "release:major": "npm version major && git push && git push --tags"
