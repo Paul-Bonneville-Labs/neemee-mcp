@@ -48,10 +48,15 @@ class NeemeeMcpServerBridge {
     const frontendUrl = this.validateAndGetFrontendUrl();
     const apiKey = this.getApiKey();
     
-    // Create custom fetch function with authentication
+    // Create custom fetch function with authentication and proper Accept headers
+    // The Accept header with text/event-stream is required to bypass Vercel's bot protection
     const authenticatedFetch = (url: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       headers.set('Authorization', `Bearer ${apiKey}`);
+      // Ensure Accept header includes both JSON and SSE to satisfy Vercel's requirements
+      if (!headers.has('Accept')) {
+        headers.set('Accept', 'application/json, text/event-stream');
+      }
       return fetch(url, { ...init, headers });
     };
     
