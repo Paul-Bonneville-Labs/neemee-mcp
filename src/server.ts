@@ -33,7 +33,7 @@ class NeemeeMcpServerBridge {
   constructor() {
     this.server = new Server(
       {
-        name: 'neemee-mcp-server',
+        name: 'neemee-mcp',
         version: VERSION,
       },
       {
@@ -79,7 +79,7 @@ class NeemeeMcpServerBridge {
     // Default to production URL for published package, localhost for development
     const defaultUrl = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev'
       ? 'http://localhost:3000/mcp'
-      : 'https://neemee.paulbonneville.com/mcp';
+      : 'https://neemee.app/mcp';
     const frontendUrlString = process.env.NEEMEE_API_BASE_URL || defaultUrl;
 
     try {
@@ -220,7 +220,7 @@ class NeemeeMcpServerBridge {
         if (error.message.includes('NEEMEE_API_BASE_URL')) {
           console.error('\nConfiguration help:');
           console.error('- For development: NEEMEE_API_BASE_URL=http://localhost:3000/mcp');
-          console.error('- For production: NEEMEE_API_BASE_URL=https://neemee.paulbonneville.com/mcp');
+          console.error('- For production: NEEMEE_API_BASE_URL=https://neemee.app/mcp');
           console.error('- Or set NODE_ENV=development to use localhost defaults');
         }
         if (error.message.includes('NEEMEE_API_KEY')) {

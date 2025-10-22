@@ -6,12 +6,10 @@ A TypeScript client library for connecting to Neemee MCP servers using the offic
 
 This library provides a convenient interface for interacting with Neemee personal knowledge management systems through the Model Context Protocol (MCP). It supports both HTTP and STDIO transport modes and includes full TypeScript support.
 
-**⚠️ Important Note:** Despite the package name `neemee-mcp-server`, this is actually a **client library** that acts as a local bridge to connect MCP clients (like Claude Desktop) to the remote Neemee MCP server. The naming will be addressed in a future version to avoid confusion.
-
 ## Installation
 
 ```bash
-npm install neemee-mcp-server
+npm install neemee-mcp
 ```
 
 ## Quick Start
@@ -19,11 +17,11 @@ npm install neemee-mcp-server
 ### HTTP Mode (Web Applications)
 
 ```typescript
-import { NeemeeClient } from 'neemee-mcp-server';
+import { NeemeeClient } from 'neemee-mcp';
 
 const client = new NeemeeClient({
   transport: 'http',
-  baseUrl: 'https://neemee.paulbonneville.com/mcp',
+  baseUrl: 'https://neemee.app/mcp',
   apiKey: 'your-api-key'
 });
 
@@ -43,7 +41,7 @@ await client.disconnect();
 ### STDIO Mode (Direct Process Communication)
 
 ```typescript
-import { NeemeeClient } from 'neemee-mcp-server';
+import { NeemeeClient } from 'neemee-mcp';
 
 const client = new NeemeeClient({
   transport: 'stdio'
@@ -198,7 +196,7 @@ import {
   NotFoundError,
   ValidationError,
   ServerError
-} from 'neemee-mcp-server';
+} from 'neemee-mcp';
 
 try {
   await client.connect();
@@ -251,7 +249,7 @@ const client = new NeemeeClient({
 For temporary compatibility, use the `LegacyNeemeeClient`:
 
 ```typescript
-import { LegacyNeemeeClient } from 'neemee-mcp-server';
+import { LegacyNeemeeClient } from 'neemee-mcp';
 
 // This provides the old API while you migrate
 const client = new LegacyNeemeeClient({
@@ -266,8 +264,8 @@ const client = new LegacyNeemeeClient({
 ### Building from Source
 
 ```bash
-git clone https://github.com/Paul-Bonneville-Labs/neemee-mcp-server.git
-cd neemee-mcp-server
+git clone https://github.com/Paul-Bonneville-Labs/neemee-mcp.git
+cd neemee-mcp
 npm install
 npm run build
 ```
@@ -298,12 +296,12 @@ npm run test:mock-api
 ### Complete Example with Error Handling
 
 ```typescript
-import { NeemeeClient, AuthenticationError, ConnectionError } from 'neemee-mcp-server';
+import { NeemeeClient, AuthenticationError, ConnectionError } from 'neemee-mcp';
 
 async function example() {
   const client = new NeemeeClient({
     transport: 'http',
-    baseUrl: 'https://neemee.paulbonneville.com/mcp',
+    baseUrl: 'https://neemee.app/mcp',
     apiKey: process.env.NEEMEE_API_KEY
   });
 
@@ -384,7 +382,7 @@ Configure Claude Desktop to connect to the Neemee MCP server using the `mcp-prox
       "command": "npx",
       "args": ["-y", "mcp-proxy"],
       "env": {
-        "MCP_SERVER_URL": "https://neemee.paulbonneville.com/mcp"
+        "MCP_SERVER_URL": "https://neemee.app/mcp"
       }
     }
   }
@@ -402,10 +400,10 @@ Use this package as a local bridge for STDIO transport:
   "mcpServers": {
     "neemee-local": {
       "command": "npx",
-      "args": ["-y", "neemee-mcp-server"],
+      "args": ["-y", "neemee-mcp"],
       "env": {
         "NEEMEE_API_KEY": "your-api-key-here",
-        "NEEMEE_API_BASE_URL": "https://neemee.paulbonneville.com/mcp"
+        "NEEMEE_API_BASE_URL": "https://neemee.app/mcp"
       }
     }
   }
@@ -417,7 +415,7 @@ Use this package as a local bridge for STDIO transport:
 ### Environment Variables
 
 - `NEEMEE_API_KEY` - Your Neemee API key (required for STDIO mode)
-- `NEEMEE_API_BASE_URL` - Base URL for Neemee API (defaults to https://neemee.paulbonneville.com/mcp)
+- `NEEMEE_API_BASE_URL` - Base URL for Neemee API (defaults to https://neemee.app/mcp)
 
 ### Authentication Scopes
 
@@ -437,7 +435,7 @@ import type {
   CreateNoteParams,
   UpdateNoteParams,
   SearchNotesParams 
-} from 'neemee-mcp-server';
+} from 'neemee-mcp';
 
 const options: NeemeeClientOptions = {
   transport: 'http',
@@ -461,5 +459,5 @@ MIT
 
 ## Support
 
-- GitHub Issues: [Report bugs and request features](https://github.com/Paul-Bonneville-Labs/neemee-mcp-server/issues)
-- Documentation: [Full API documentation](https://github.com/Paul-Bonneville-Labs/neemee-mcp-server#readme)
+- GitHub Issues: [Report bugs and request features](https://github.com/Paul-Bonneville-Labs/neemee-mcp/issues)
+- Documentation: [Full API documentation](https://github.com/Paul-Bonneville-Labs/neemee-mcp#readme)

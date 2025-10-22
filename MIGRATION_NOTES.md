@@ -1,6 +1,58 @@
-# JSON-RPC Migration Notes
+# Migration Notes
 
-## Overview
+## v3.0.0 - Package Rename and Domain Migration (2025-10-22)
+
+### Breaking Changes
+- **Package renamed** from `neemee-mcp-server` to `neemee-mcp`
+- **Default API URL** changed to `https://neemee.app/mcp` (from `https://neemee.paulbonneville.com/mcp`)
+- **CLI command** changed from `neemee-mcp-server` to `neemee-mcp`
+
+### Migration Steps
+
+**1. Uninstall old package:**
+```bash
+npm uninstall -g neemee-mcp-server
+```
+
+**2. Install new package:**
+```bash
+npm install -g neemee-mcp
+```
+
+**3. Update Claude Desktop config:**
+Update your `~/.claude.json` or Claude Desktop configuration file:
+```json
+{
+  "mcpServers": {
+    "neemee": {
+      "command": "npx",
+      "args": ["-y", "neemee-mcp"],
+      "env": {
+        "NEEMEE_API_KEY": "your-api-key",
+        "NEEMEE_API_BASE_URL": "https://neemee.app/mcp"
+      }
+    }
+  }
+}
+```
+
+**4. Update imports** (if using as a library):
+```typescript
+// Old
+import { NeemeeClient } from 'neemee-mcp-server';
+
+// New
+import { NeemeeClient } from 'neemee-mcp';
+```
+
+### No Code Changes Required
+The API remains the same - only the package name and domain have changed. All functionality is preserved.
+
+---
+
+## JSON-RPC Migration Notes
+
+### Overview
 This document outlines the successful migration from individual REST endpoints to a unified JSON-RPC HTTP endpoint as specified in GitHub issue #8.
 
 ## Changes Implemented

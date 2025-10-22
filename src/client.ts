@@ -48,7 +48,7 @@ export class NeemeeMcpClient {
     });
 
     if (options.transport === 'http') {
-      this.transport = new SSEClientTransport(new URL(options.baseUrl || 'https://neemee.paulbonneville.com/mcp'));
+      this.transport = new SSEClientTransport(new URL(options.baseUrl || 'https://neemee.app/mcp'));
     } else {
       this.transport = new StdioClientTransport({ 
         command: 'node',
