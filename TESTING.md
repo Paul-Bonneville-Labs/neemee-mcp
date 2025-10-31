@@ -116,8 +116,8 @@ The mock API server (`test/mock-api-server.js`) provides:
 # Required
 NEEMEE_API_KEY=test-key-for-local-testing
 
-# Optional (defaults to localhost:3000/api)
-NEEMEE_API_BASE_URL=http://localhost:3001
+# Optional (defaults to localhost:3000/mcp for development, neemee.app/mcp for production)
+NEEMEE_API_BASE_URL=http://localhost:3001/mcp
 ```
 
 ## Debugging

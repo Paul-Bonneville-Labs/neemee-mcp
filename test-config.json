@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["dist/server.js"],
       "env": {
-        "NEEMEE_API_BASE_URL": "http://localhost:3000/api",
+        "NEEMEE_API_BASE_URL": "http://localhost:3000/mcp",
         "NEEMEE_API_KEY": "your-test-api-key-here"
       }
     }

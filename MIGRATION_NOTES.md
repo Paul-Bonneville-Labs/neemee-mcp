@@ -1,5 +1,34 @@
 # Migration Notes
 
+## v3.0.1 - Simplified Authentication (2025-10-28)
+
+### Changes
+- The `neemee` MCP server configuration in `settings.json` has been updated to use the `neemee-mcp` npx package.
+- The API key is now passed using the `--api-key` flag or the `NEEMEE_API_KEY` environment variable.
+- The `MCP_SERVER_URL` environment variable is no longer used.
+
+### Migration Steps
+
+Update your `~/.gemini/settings.json` or Gemini CLI configuration file:
+
+```json
+{
+  "mcpServers": {
+    "neemee": {
+      "command": "npx",
+      "args": ["-y", "neemee-mcp", "--api-key=your-api-key-here"],
+      "env": {
+        "NEEMEE_API_BASE_URL": "https://neemee.app/mcp"
+      }
+    }
+  }
+}
+```
+
+Alternatively, you can use the `NEEMEE_API_KEY` environment variable instead of the `--api-key` flag.
+
+---
+
 ## v3.0.0 - Package Rename and Domain Migration (2025-10-22)
 
 ### Breaking Changes

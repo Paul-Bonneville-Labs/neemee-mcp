@@ -371,28 +371,6 @@ const resourceNotes = await client.resources.listNotes({
 
 ## Claude Desktop Configuration
 
-### Method 1: HTTP Connection via Proxy (Recommended)
-
-Configure Claude Desktop to connect to the Neemee MCP server using the `mcp-proxy` package:
-
-```json
-{
-  "mcpServers": {
-    "neemee": {
-      "command": "npx",
-      "args": ["-y", "mcp-proxy"],
-      "env": {
-        "MCP_SERVER_URL": "https://neemee.app/mcp"
-      }
-    }
-  }
-}
-```
-
-**Authentication:** Uses Clerk OAuth - no API key needed. Authentication is handled through the OAuth flow. The `mcp-proxy` package bridges Claude Desktop's STDIO interface with the HTTP MCP server.
-
-### Method 2: Local STDIO Bridge
-
 Use this package as a local bridge for STDIO transport:
 
 ```json
@@ -400,9 +378,8 @@ Use this package as a local bridge for STDIO transport:
   "mcpServers": {
     "neemee-local": {
       "command": "npx",
-      "args": ["-y", "neemee-mcp"],
+      "args": ["-y", "neemee-mcp", "--api-key=your-api-key-here"],
       "env": {
-        "NEEMEE_API_KEY": "your-api-key-here",
         "NEEMEE_API_BASE_URL": "https://neemee.app/mcp"
       }
     }
@@ -410,7 +387,7 @@ Use this package as a local bridge for STDIO transport:
 }
 ```
 
-**Authentication:** Uses API key authentication. Get your API key from Neemee settings.
+**Authentication:** Uses API key authentication. Get your API key from Neemee settings. The API key can be provided via the `--api-key` flag in the `args` or as a `NEEMEE_API_KEY` environment variable.
 
 ### Environment Variables
 

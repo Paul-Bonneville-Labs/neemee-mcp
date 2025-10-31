@@ -76,7 +76,7 @@ This is a **Model Context Protocol (MCP) server** for the Neemee personal knowle
 
 **Environment Variables:**
 - `NEEMEE_API_KEY` (required): API key for authentication
-- `NEEMEE_API_BASE_URL` (optional): Base URL for Neemee API (defaults to http://localhost:3000/api)
+- `NEEMEE_API_BASE_URL` (optional): Base URL for Neemee MCP server (defaults to https://neemee.app/mcp for production, http://localhost:3000/mcp for development)
 
 ### API Architecture
 
