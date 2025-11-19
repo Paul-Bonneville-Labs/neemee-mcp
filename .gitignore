@@ -40,3 +40,6 @@ logs/
 
 # Git worktrees
 .worktrees/
+
+# MCP Registry tokens
+.mcpregistry_*

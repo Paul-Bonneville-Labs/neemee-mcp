@@ -33,6 +33,7 @@
   ],
   "author": "Paul Bonneville <paul@paulbonneville.com>",
   "license": "MIT",
+  "mcpName": "io.github.pbonneville/neemee-mcp",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Paul-Bonneville-Labs/neemee-mcp.git"

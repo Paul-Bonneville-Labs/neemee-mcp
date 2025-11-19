@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.pbonneville/neemee-mcp",
+  "description": "MCP client library and bridge for Neemee personal knowledge management system",
+  "repository": {
+    "url": "https://github.com/Paul-Bonneville-Labs/neemee-mcp",
+    "source": "github"
+  },
+  "version": "3.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "neemee-mcp",
+      "version": "3.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "API key for authenticating with Neemee API (required)",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "NEEMEE_API_KEY"
+        },
+        {
+          "description": "Base URL for Neemee MCP server (optional, defaults to https://neemee.app/mcp)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "NEEMEE_API_BASE_URL"
+        }
+      ]
+    }
+  ]
+}
