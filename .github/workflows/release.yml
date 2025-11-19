@@ -301,10 +301,53 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  notify:
-    name: 📢 Notify Success  
+  publish-mcp:
+    name: 📡 Publish to MCP Registry
     runs-on: ubuntu-latest
     needs: [check-version, release, publish-npm]
+    if: needs.publish-npm.result == 'success'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install mcp-publisher
+        run: |
+          # Install mcp-publisher CLI
+          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher-linux-x64 -o mcp-publisher
+          chmod +x mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: 🔐 Authenticate with GitHub
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | mcp-publisher login github --token-stdin
+
+      - name: 🚀 Publish to MCP Registry
+        run: |
+          echo "🚀 Publishing to MCP Registry..."
+          mcp-publisher publish
+          echo "✅ Successfully published to MCP Registry!"
+
+      - name: 📱 Update release with MCP info
+        run: |
+          VERSION="v${{ needs.check-version.outputs.new-version }}"
+
+          # Get current release notes and append MCP info
+          gh release view "$VERSION" --json body --jq '.body' > current_notes.md
+
+          echo "" >> current_notes.md
+          echo "## 🔗 MCP Registry" >> current_notes.md
+          echo "" >> current_notes.md
+          echo "This server is now available in the Model Context Protocol Registry!" >> current_notes.md
+          echo "- 📡 [View on MCP Registry](https://registry.modelcontextprotocol.io/servers/io.github.pbonneville/neemee-mcp)" >> current_notes.md
+
+          gh release edit "$VERSION" --notes-file current_notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: 📢 Notify Success
+    runs-on: ubuntu-latest
+    needs: [check-version, release, publish-npm, publish-mcp]
     if: always() && needs.release.outputs.release-created == 'true'
     steps:
       - name: 🎉 Success Summary
@@ -319,6 +362,12 @@ jobs:
             echo "- 📦 Published to NPM: [neemee-mcp-server@${{ needs.check-version.outputs.new-version }}](https://www.npmjs.com/package/neemee-mcp-server/v/${{ needs.check-version.outputs.new-version }})" >> $GITHUB_STEP_SUMMARY
           else
             echo "- ⚠️ NPM publish failed or skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.publish-mcp.result }}" = "success" ]; then
+            echo "- 📡 Published to MCP Registry: [io.github.pbonneville/neemee-mcp](https://registry.modelcontextprotocol.io/servers/io.github.pbonneville/neemee-mcp)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⚠️ MCP Registry publish failed or skipped" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY

@@ -6,12 +6,12 @@
     "url": "https://github.com/Paul-Bonneville-Labs/neemee-mcp",
     "source": "github"
   },
-  "version": "3.0.1",
+  "version": "3.0.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "neemee-mcp",
-      "version": "3.0.1",
+      "version": "3.0.2",
       "transport": {
         "type": "stdio"
       },
