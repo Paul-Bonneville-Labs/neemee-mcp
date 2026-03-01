@@ -4,112 +4,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Build & Development
-- `npm run build` - Build TypeScript to dist/ directory
-- `npm run dev` - Run development server with tsx (hot reload)
-- `npm start` - Start production server from dist/
-- `npm run prepublishOnly` - Build before publishing (runs automatically)
+- `npm run build` - Build TypeScript to `dist/` (runs `tsc`)
+- `npm run dev` - Dev server with hot reload (`NODE_ENV=development tsx src/server.ts`)
+- `npm start` - Production server from `dist/server.js`
+- `npm test` - Run all tests (client + legacy)
+- `npm run test:client` - Test client API (builds first)
+- `npm run test:legacy` - Test legacy compatibility (builds first)
+- `npm run test:server` - Start dev server with test API key
+- `npm run release:patch` / `release:minor` / `release:major` - Bump version, push with tags
 
-### Package Management
-- `npm install` - Install all dependencies
-- `npx neemee-mcp` - Run published version
+## Architecture
 
-## Architecture Overview
+This is a **dual-purpose npm package** (`neemee-mcp`) for the Neemee personal knowledge management system:
 
-This is a **Model Context Protocol (MCP) server** for the Neemee personal knowledge management system. It provides Claude Code and other MCP clients with access to notes, notebooks, and collections through HTTP API calls to a Neemee backend service.
+1. **MCP Server Bridge** (CLI binary via `npx neemee-mcp`) — a thin proxy that connects Claude Code (STDIO transport) to a remote Neemee MCP server (Streamable HTTP transport)
+2. **Client Library** (programmatic import) — typed wrappers around MCP tool/resource calls for use in applications
 
-### Core Components
+### Server Bridge (`src/server.ts`)
 
-**Server Architecture:**
-- **Main Server** (`src/server.ts`): Central MCP server implementation with resource/tool handlers
-- **API Client** (`src/lib/neemee-api-client.ts`): HTTP client for communicating with Neemee API
-- **Tool Handlers** (`src/server-tools.ts`): Business logic for MCP tool operations
-- **Utilities** (`src/lib/domainUtils.ts`): URL/domain extraction and manipulation
+`NeemeeMcpServerBridge` is the CLI entrypoint. It does **no business logic** — it creates an MCP `Client` connected to the remote Neemee server via `StreamableHTTPClientTransport`, then exposes that same interface locally via `StdioServerTransport`. All `listTools`, `listResources`, `readResource`, and `callTool` requests are proxied through to the remote server.
 
-**API Integration:**
-- **Authentication**: API key-based authentication handled by Neemee API
-- **Data Access**: All CRUD operations performed via HTTP API calls
-- **Scoped Permissions**: API key scopes (`read`, `write`, `admin`) enforced by backend
-- **No Direct Database Access**: Maintains proper separation of concerns
+Key details:
+- Authentication: injects `Bearer` token via custom fetch wrapper
+- Adds `Accept: application/json, text/event-stream` header to bypass Vercel bot protection
+- Connection retry with exponential backoff (3 attempts)
+- `NODE_ENV=development` defaults to `http://localhost:3000/mcp`, production defaults to `https://neemee.app/mcp`
 
-### Key Features
+### Client Library (`src/index.ts` → `src/client.ts`)
 
-**Resources (Read Access):**
-- `notes://list` - Paginated note listing with comprehensive search/filtering (supports text, notebook, domain, and tag filters)
-- `notes://{id}` - Individual note access
-- `notebooks://list` - Notebook listing with note counts
-- `notebooks://{id}` - Individual notebook details
-- `stats://overview` - Usage statistics and insights
-- `collections://recent` - Recently created/updated content
+`NeemeeClient` wraps the MCP SDK `Client` and exposes:
+- `client.tools` (`src/operations/tools.ts`) — typed methods for `create_note`, `update_note`, `delete_note`, `search_notes`, notebook CRUD, `search_notebooks`
+- `client.resources` (`src/operations/resources.ts`) — typed methods for `listNotes`, `getNote`, `listNotebooks`, `getNotebook`, `getStats`, `getHealth`, `getRecentActivity`
 
-**Tools (Write Operations):**
-- `create_note`, `update_note`, `delete_note` - Note CRUD operations
-- `search_notes` - Advanced search with comprehensive filtering (notebook, domain, tag, date range, and text search)
-- `create_notebook`, `update_notebook`, `delete_notebook` - Notebook management
-- `search_notebooks` - Notebook search functionality
+### Legacy Support (`src/legacy.ts`)
 
-### Tag-Based Search Features
+`LegacyNeemeeClient` wraps `NeemeeClient` with the v1.x API surface for backward compatibility. Deprecated.
 
-**Tag Support:**
-- **Tag Storage**: Tags are stored in note frontmatter as `tags: []` array in JSONB format
-- **Tag Filtering**: Both tools and resources support tag-based filtering
-- **Multiple Tags**: Support for searching by single tag or comma-separated multiple tags
-- **Combined Filters**: Tags can be combined with other filters (notebook, domain, date range, text query)
+### Error Hierarchy (`src/errors.ts`)
 
-**Usage Examples:**
-- Single tag search: `search_notes` with `tags: "GenAI"`
-- Multiple tags: `search_notes` with `tags: "GenAI,productivity,automation"`
-- Combined filtering: `search_notes` with `tags: "AI"` + `notebook: "Work"` + `domain: "github.com"`
-- Resource access: `notes://list?tags=GenAI&notebook=work&limit=10`
+`NeemeeClientError` base class with subtypes: `AuthenticationError`, `ConnectionError`, `NotFoundError`, `ValidationError`, `ServerError`. All wrap MCP SDK errors with HTTP-style status codes.
 
-**Tag Display:**
-- Search results include tag information extracted from frontmatter
-- Tags displayed in readable format: `Tags: GenAI, productivity, automation`
-- Empty tag arrays show as `Tags: None`
+## Environment Variables
 
-### Authentication & Permissions
+- `NEEMEE_API_KEY` (required) — API key for authentication
+- `NEEMEE_API_BASE_URL` (optional) — overrides the remote MCP server URL
+- `NODE_ENV` — set to `development` to use localhost defaults
 
-**API Key Scopes:**
-- `read`: Access to resources and search operations
-- `write`: Create and update operations
-- `admin`: Delete operations
+## Project Configuration
 
-**Environment Variables:**
-- `NEEMEE_API_KEY` (required): API key for authentication
-- `NEEMEE_API_BASE_URL` (optional): Base URL for Neemee MCP server (defaults to https://neemee.app/mcp for production, http://localhost:3000/mcp for development)
-
-### API Architecture
-
-The MCP server acts as a client to the Neemee API:
-- **Stateless Design**: No local data storage or caching
-- **HTTP-Based Communication**: All operations via REST API calls
-- **Authentication Delegation**: API key validation handled by backend
-- **Error Handling**: Proper error propagation from API to MCP client
-- **Resource Mapping**: MCP resources and tools mapped to corresponding API endpoints
-
-### Performance Considerations
-
-- **Network Dependency**: Requires reliable connection to Neemee API
-- **API Rate Limits**: Respects backend API rate limiting
-- **Efficient Data Transfer**: Minimal payload sizes and selective field requests
-- **Connection Reuse**: HTTP client optimized for multiple requests
-
-## Testing & Validation
-
-**Available Test Scripts:**
-- `npm run test:mock-api` - Start mock API server for testing
-- `node test/validate-tags.js` - Validate tag search functionality
-- `node test/tag-integration-test.js` - Comprehensive tag feature testing
-- `npm run test:integration` - Full integration testing
-
-**Tag Testing:**
-- Mock API server includes sample notes with tags in frontmatter
-- Test coverage includes single tag, multiple tags, and combined filter scenarios
-- Validates both MCP tools and resources support tag parameters
-
-## Deployment
-
-This MCP server only requires:
-- Node.js runtime environment
-- Network access to Neemee API endpoint
-- Valid API key with appropriate scopes
+- ESM package (`"type": "module"`) — all imports use `.js` extensions
+- TypeScript strict mode, target ES2022, `moduleResolution: "bundler"`
+- Source in `src/`, compiled output in `dist/`
+- Tests are plain `.js` files in `test/` that run against the built `dist/` output (must build first)
