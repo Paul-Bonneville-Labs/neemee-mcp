@@ -1,6 +1,6 @@
 {
   "name": "neemee-mcp",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "MCP client library and bridge for Neemee personal knowledge management system",
   "type": "module",
   "main": "dist/index.js",
