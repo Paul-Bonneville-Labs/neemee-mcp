@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ConnectionError, AuthenticationError } from './errors.js';
 
 export interface NeemeeClientOptions {
@@ -37,7 +37,7 @@ export interface SearchNotesParams {
 
 export class NeemeeMcpClient {
   private mcpClient: Client;
-  private transport: SSEClientTransport | StdioClientTransport;
+  private transport: StreamableHTTPClientTransport | StdioClientTransport;
 
   constructor(options: NeemeeClientOptions) {
     this.mcpClient = new Client({
@@ -48,7 +48,7 @@ export class NeemeeMcpClient {
     });
 
     if (options.transport === 'http') {
-      this.transport = new SSEClientTransport(new URL(options.baseUrl || 'https://neemee.app/mcp'));
+      this.transport = new StreamableHTTPClientTransport(new URL(options.baseUrl || 'https://neemee.app/mcp'));
     } else {
       this.transport = new StdioClientTransport({ 
         command: 'node',
