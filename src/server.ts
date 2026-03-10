@@ -110,7 +110,7 @@ class NeemeeMcpServerBridge {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.mcpClient.connect(this.transport);
-        console.log(`Successfully connected to frontend MCP server`);
+        console.error(`Successfully connected to frontend MCP server`);
         return;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -120,7 +120,7 @@ class NeemeeMcpServerBridge {
         }
         
         console.error(`Connection attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
-        console.log(`Retrying in ${retryDelayMs}ms...`);
+        console.error(`Retrying in ${retryDelayMs}ms...`);
         
         // Exponential backoff
         await new Promise(resolve => setTimeout(resolve, retryDelayMs * attempt));
@@ -212,7 +212,7 @@ class NeemeeMcpServerBridge {
       // Then start STDIO server for Claude Code
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      console.log('Neemee MCP Server Bridge started and ready for Claude Code connections');
+      console.error('Neemee MCP Server Bridge started and ready for Claude Code connections');
     } catch (error) {
       if (error instanceof Error) {
         console.error('Failed to start Neemee MCP Server Bridge:');
